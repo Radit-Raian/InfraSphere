@@ -1,0 +1,12 @@
+{
+  "name": "infrasphere",
+  "version": "0.2.0",
+  "description": "A Stellarium-style infrared sky viewer built on NASA SPHEREx data, labelled with SIMBAD.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 serve.py 8000",
+    "test": "node test/run.js"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>InfraSphere: the infrared sky</title>
+<meta name="description" content="A Stellarium-style planetarium that paints the sky with NASA SPHEREx infrared data and labels it with SIMBAD.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="sky" aria-label="Interactive view of the sky"></canvas>
+<canvas id="labels" aria-hidden="true"></canvas>
+<div id="hover"></div>
+<div id="status" role="status"></div>
+
+<button class="btn" id="toggle" aria-label="Show or hide controls">Controls</button>
+<aside id="info" class="hidden" aria-live="polite"></aside>
+<div id="inspector" class="hidden" role="dialog" aria-label="SPHEREx epoch inspector"></div>
+
+<div id="panel">
+  <div>
+    <h1>InfraSphere</h1>
+    <p class="sub">Stand on the ground and look up. The sky is painted with NASA SPHEREx infrared data and every name comes from SIMBAD.</p>
+  </div>
+
+  <section>
+    <h2>Find an object</h2>
+    <div class="row">
+      <input type="text" id="search" placeholder="M31, Sirius, NGC 7000" aria-label="Object name">
+      <button class="btn" id="searchBtn">Go</button>
+    </div>
+    <p class="note" style="margin:6px 0 0">Or tap any spot in the sky to ask SIMBAD what is there.</p>
+  </section>
+
+  <section>
+    <h2>Infrared band</h2>
+    <div class="bands" id="bands"></div>
+    <div class="row" style="margin-top:8px">
+      <label for="quality">Map detail</label>
+      <select id="quality">
+        <option value="1">Fast (1024)</option>
+        <option value="2" selected>Balanced (up to 2048)</option>
+        <option value="3">High (up to 4096)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="sharp" checked> Sharpen when zoomed in</label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Labels</h2>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="lbl-star"> Stars</label>
+      <label class="check"><input type="checkbox" id="lbl-galaxy"> Galaxies</label>
+      <label class="check"><input type="checkbox" id="lbl-cluster"> Clusters</label>
+      <label class="check"><input type="checkbox" id="lbl-nebula"> Nebulae</label>
+      <label class="check"><input type="checkbox" id="lbl-other"> Other</label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Solar system</h2>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="planets" checked> Sun, Moon, planets</label>
+      <label class="check"><input type="checkbox" id="asteroids"> Asteroids</label>
+      <label class="check"><input type="checkbox" id="neo"> Near-Earth asteroids</label>
+    </div>
+    <p class="note" style="margin:6px 0 0">Switch on <b>InfraSphere tile grid</b> under View, then tap a tile to inspect its SPHEREx exposures from every date.</p>
+  </section>
+
+  <section>
+    <h2>Where you stand</h2>
+    <div class="row">
+      <label for="lat">Lat</label><input type="number" id="lat" step="0.01" min="-90" max="90">
+      <label for="lon">Lon</label><input type="number" id="lon" step="0.01" min="-180" max="180">
+    </div>
+    <div class="row"><button class="btn" id="geo">Use my location</button></div>
+  </section>
+
+  <section>
+    <h2>When</h2>
+    <div class="row"><input type="datetime-local" id="time" aria-label="Date and time"></div>
+    <div class="row">
+      <button class="btn" id="now">Now</button>
+      <button class="btn" id="m1h">-1 h</button>
+      <button class="btn" id="p1h">+1 h</button>
+      <select id="speed" aria-label="Time speed">
+        <option value="0">Paused</option>
+        <option value="1" selected>Real time</option>
+        <option value="60">1 min / s</option>
+        <option value="600">10 min / s</option>
+        <option value="3600">1 hour / s</option>
+        <option value="86400">1 day / s</option>
+      </select>
+    </div>
+  </section>
+
+  <section>
+    <h2>View</h2>
+    <div class="row">
+      <select id="proj" aria-label="Projection">
+        <option value="0" selected>Stereographic</option>
+        <option value="1">Perspective</option>
+      </select>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="ground" checked> Ground</label>
+      <label class="check"><input type="checkbox" id="grid" checked> Alt-az grid</label>
+      <label class="check"><input type="checkbox" id="eqgrid"> Equatorial grid</label>
+      <label class="check"><input type="checkbox" id="galgrid"> Galactic grid</label>
+      <label class="check"><input type="checkbox" id="dirs" checked> Directions</label>
+      <label class="check"><input type="checkbox" id="tilegrid"> InfraSphere tile grid</label>
+    </div>
+    <div class="row" style="display:block">
+      <label for="expo">Brightness</label>
+      <input type="range" id="expo" min="0.3" max="4" step="0.05" value="1.4">
+      <label for="gam">Contrast</label>
+      <input type="range" id="gam" min="0.5" max="2.5" step="0.05" value="1.0">
+    </div>
+  </section>
+
+  <section>
+    <h2>Looking at</h2>
+    <div class="readout" id="readout"></div>
+  </section>
+
+  <details>
+    <summary>Troubleshooting</summary>
+    <div class="row" style="margin-top:8px">
+      <label class="check"><input type="checkbox" id="flip"> Mirror map east-west</label>
+    </div>
+    <div class="row">
+      <label for="file" class="note">Or load your own equirectangular all-sky image (RA increasing to the left, north up):</label>
+      <input type="file" id="file" accept="image/*">
+    </div>
+  </details>
+
+  <p class="note">Drag to look around, scroll or pinch to zoom, arrow keys also work. Band wavelengths are approximate.</p>
+</div>
+
+<footer id="credits">
+  SPHEREx data: NASA/JPL-Caltech, via IRSA and CDS. Object data: SIMBAD, CDS, Strasbourg, France.
+</footer>
+
+<noscript><p style="position:absolute;top:40%;width:100%;text-align:center">InfraSphere needs JavaScript.</p></noscript>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
