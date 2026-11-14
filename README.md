@@ -4,6 +4,10 @@ A Stellarium-style planetarium for the infrared sky. Stand on the ground, look u
 
 ![colour scale](https://img.shields.io/badge/colour%20scale-magma-8c2981) ![tests](https://img.shields.io/badge/tests-67%20passing-brightgreen) ![license](https://img.shields.io/badge/license-MIT-blue)
 
+<p align="center">
+<img src="test/Screenshot from 2026-11-15 01-36-38.png" alt="InfraSphere Web" style="width:100%; height:auto;">
+</p>
+
 ## Contents
 
 1. [Quick start](#quick-start)
@@ -11,8 +15,7 @@ A Stellarium-style planetarium for the infrared sky. Stand on the ground, look u
 3. [Controls](#controls)
 4. [Simulated and real sky](#simulated-and-real-sky)
 5. [Sky background model](#sky-background-model)
-6. [How it works](#how-it-works)
-7. [Credits and license](#credits-and-license)
+6. [Credits and license](#credits-and-license)
 
 ## Quick start
 
