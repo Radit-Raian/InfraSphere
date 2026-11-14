@@ -18,6 +18,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 TARGETS = {
     "/proxy/irsa/": os.environ.get("INFRASPHERE_IRSA", "https://irsa.ipac.caltech.edu/"),
     "/proxy/jpl/": os.environ.get("INFRASPHERE_JPL", "https://ssd-api.jpl.nasa.gov/"),
+    "/proxy/simbad/": os.environ.get("INFRASPHERE_SIMBAD", "https://simbad.cds.unistra.fr/"),
 }
 
 
@@ -28,8 +29,18 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.forward(target.rstrip("/") + "/" + self.path[len(prefix):])
         return super().do_GET()
 
-    def forward(self, url):
-        req = urllib.request.Request(url, headers={"User-Agent": "InfraSphere-dev-proxy", "Accept": "*/*"})
+    def do_POST(self):
+        for prefix, target in TARGETS.items():
+            if self.path.startswith(prefix):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                return self.forward(target.rstrip("/") + "/" + self.path[len(prefix):], body, self.headers.get("Content-Type"))
+        self.send_error(405)
+
+    def forward(self, url, body=None, ctype=None):
+        headers = {"User-Agent": "InfraSphere-dev-proxy", "Accept": "*/*"}
+        if ctype:
+            headers["Content-Type"] = ctype
+        req = urllib.request.Request(url, data=body, headers=headers)
         try:
             resp = urllib.request.urlopen(req, timeout=120)
         except urllib.error.HTTPError as e:      # pass the service's own error through
@@ -49,8 +60,12 @@ class Handler(SimpleHTTPRequestHandler):
         finally:
             resp.close()
 
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")  # always pick up edited files
+        super().end_headers()
+
     def log_message(self, fmt, *args):
-        if "/proxy/" in (args[0] if args else ""):
+        if "/proxy/" in str(args[0] if args else ""):
             sys.stderr.write("proxy  " + fmt % args + "\n")
 
 

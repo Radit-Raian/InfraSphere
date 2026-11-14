@@ -21,7 +21,7 @@ export const CONFIG = {
   sbdbApi: "https://ssd-api.jpl.nasa.gov/sbdb_query.api",
   // If the browser blocks a direct request (CORS), the app retries through these same-origin paths,
   // which serve.py forwards. Plain "python3 -m http.server" has no such paths.
-  proxy: { irsa: "/proxy/irsa", jpl: "/proxy/jpl" },
+  proxy: { irsa: "/proxy/irsa", jpl: "/proxy/jpl", simbad: "/proxy/simbad" },
 
   // Where the observer stands at start-up (editable in the page).
   location: { lat: 23.81, lon: 90.41 },

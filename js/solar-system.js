@@ -127,8 +127,7 @@ export class SolarSystem {
   constructor(ui, fetcher) {
     this.ui = ui;
     this.fetcher = fetcher || ((url) => svcFetch("jpl", url));
-    this.bodies = [];            // Sun, Moon, planets
-    this.main = [];              // brighter asteroids (orbits)
+    this.main = [];            // brighter asteroids (orbits)
     this.neo = [];               // near-Earth asteroids (orbits)
     this.asteroids = [];         // current positions of whichever asteroid sets are switched on
     this.lastMs = NaN;
@@ -163,7 +162,6 @@ export class SolarSystem {
     if (!(Math.abs(ms - this.lastMs) > 20000) && this._sig === `${asteroids}|${neo}|${this.main.length}|${this.neo.length}`) return;
     this._sig = `${asteroids}|${neo}|${this.main.length}|${this.neo.length}`;
     this.lastMs = ms;
-    this.bodies = majorBodies(ms);
     const jd = jdFromMs(ms);
     const e = A.HelioVector(A.Body.Earth, A.MakeTime(new Date(ms)));
     const earth = [e.x, e.y, e.z];
@@ -171,12 +169,12 @@ export class SolarSystem {
     this.asteroids = list.map(([el, near]) => ({ ...asteroidPosition(el, jd, earth), id: el.id, kind: "asteroid", name: el.name, H: el.H, near, color: near ? "#ffb07a" : "#c9d6a8" }));
   }
 
-  /** opts: { planets, asteroids, neo, hideBelow, selectedId } */
+  /** opts: { asteroids, neo, hideBelow }. The Sun, Moon and planets are not drawn: a flat coloured dot is not what they
+   *  look like. majorBodies() still gives their positions. */
   draw(ctx, view, latDeg, lst, opts) {
     this.screen.length = 0;
     ctx.textBaseline = "middle"; ctx.textAlign = "left";
     const items = [];
-    if (opts.planets) items.push(...this.bodies);
     if (opts.asteroids || opts.neo) items.push(...this.asteroids);
     const placed = [];
     for (const o of items) {

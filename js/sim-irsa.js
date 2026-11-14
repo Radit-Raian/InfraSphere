@@ -5,7 +5,8 @@
 //                    plus zodiacal light that drifts with the seasons, variable stars, PSF, shot noise and read noise (Secs 6.2, 6.4).
 // Images are deterministic: the same exposure of the same spot always gives the same pixels.
 
-import { BANDS, bandIndex, fieldAt, restValue, zlAt, zlShapeOfBeta, eclOf, gatherStars, starLimit, starRatio, variability, splat, mulberry32, hashStr } from "./sim-sky.js";
+import { BANDS, bandIndex, fieldAt, restValue, FIELD, eclOf, gatherStars, starLimit, starRatio, variability, splat, mulberry32, hashStr } from "./sim-sky.js";
+import { Los, earthState, dglPerFir } from "./sky-background.js";
 import { makeWcs } from "./fits.js";
 
 const D2R = Math.PI / 180;
@@ -70,24 +71,31 @@ function getScene(ra, dec, size) {
     if (Math.abs(xi[i]) < side * 0.6 && Math.abs(eta[i]) < side * 0.6) keep.push(i);
   }
   const ecl = eclOf(ra, dec);
-  sc = { key, ra, dec, side, ns, sc: side / ns, c, e, nn, stars, xi, eta, keep, base: {}, shape: zlShapeOfBeta(ecl.lat * D2R), lon: ecl.lon };
+  sc = { key, ra, dec, side, ns, sc: side / ns, c, e, nn, stars, xi, eta, keep, base: {}, ecl };
   scenes.unshift(sc); if (scenes.length > 4) scenes.pop();
   return sc;
 }
-/** Zodiacal-free sky for one detector band over the scene (MJy/sr), computed once per band. */
+/** The non-zodiacal sky for one detector band over the scene, computed once per band:
+ *  rest = EBL + unresolved starlight + extended sources (MJy/sr, wavelength-independent within a band);
+ *  fir  = far-infrared brightness (MJy/sr), which is turned into DGL later at each pixel's own wavelength. */
+const NO_ZL_DGL = { zl: false, dgl: false, ebl: true, stars: true };
 function baseMap(sc, k) {
   if (sc.base[k]) return sc.base[k];
-  const out = new Float32Array(sc.ns * sc.ns);
+  const rest = new Float32Array(sc.ns * sc.ns), fir = new Float32Array(sc.ns * sc.ns);
   const pixRad = sc.sc * D2R, oct = Math.max(2, Math.min(11, Math.floor(Math.log2(0.5 / (pixRad * 12))) + 1));
   for (let j = 0; j < sc.ns; j++) for (let i = 0; i < sc.ns; i++) {
     const xi = -(i + 0.5 - sc.ns / 2) * pixRad, eta = (sc.ns / 2 - (j + 0.5)) * pixRad;
     const x = sc.c[0] + xi * sc.e[0] + eta * sc.nn[0], y = sc.c[1] + xi * sc.e[1] + eta * sc.nn[1], z = sc.c[2] + xi * sc.e[2] + eta * sc.nn[2];
     const n = 1 / Math.hypot(x, y, z);
     fieldAt(x * n, y * n, z * n, oct);
-    out[j * sc.ns + i] = restValue(k);
+    rest[j * sc.ns + i] = restValue(k, NO_ZL_DGL);
+    fir[j * sc.ns + i] = FIELD.fir;
   }
-  return (sc.base[k] = out);
+  return (sc.base[k] = { rest, fir });
 }
+
+const bilerp = (arr, s2, i0, j0, tx, ty) =>
+  (arr[j0 * s2 + i0] * (1 - tx) + arr[j0 * s2 + i0 + 1] * tx) * (1 - ty) + (arr[(j0 + 1) * s2 + i0] * (1 - tx) + arr[(j0 + 1) * s2 + i0 + 1] * tx) * ty;
 
 function gauss(rng) { return Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng()); }
 
@@ -113,20 +121,28 @@ export async function simulatedCutout(exposure, ra, dec, size, { signal } = {}) 
   const cp = (n + 1) / 2;
   const header = new Map(Object.entries({ NAXIS: 2, NAXIS1: n, NAXIS2: n, CRVAL1: ra, CRVAL2: dec, CRPIX1: cp, CRPIX2: cp, CD1_1: cd[0], CD1_2: cd[1], CD2_1: cd[2], CD2_2: cd[3] }));
 
-  // zodiacal light: spectrum from the paper, latitude shape, a seasonal drift and a little exposure-to-exposure scatter
-  const tf = 1 + 0.06 * Math.cos(2 * Math.PI * (exposure.mjd - 61000) / 365.25) * Math.min(1, sc.shape) + 0.02 * (rng() - 0.5);
+  // Wavelength gradient of the linear variable filter: row iy sees lam + slope * (iy - n/2).
   const slope = (B.hi - B.lo) / 2040;                  // um per pixel along the spectral axis
+  const lamRow = (iy) => lam + slope * (iy - n / 2);
+
+  // Zodiacal light (paper Sec. 4.1): the Kelsall-model line-of-sight integral for this position on the sky and this
+  // exposure's date, with Earth where it was then. Evaluated at a few wavelengths down the detector and interpolated
+  // between them (the spectrum is smooth), which gives the strong vertical gradient of the long-wavelength bands.
+  const earth = earthState(exposure.mjd);
+  const los = new Los(240).fill(sc.ecl.lon * D2R, sc.ecl.lat * D2R, earth.lon, earth.r);
+  const NZ = 7, zlNode = Array.from({ length: NZ }, (_, q) => los.at(lamRow((q / (NZ - 1)) * (n - 1))));
+  const zlRow = (iy) => { const f = (iy / Math.max(1, n - 1)) * (NZ - 1), q = Math.min(NZ - 2, Math.floor(f)); return zlNode[q] + (zlNode[q + 1] - zlNode[q]) * (f - q); };
+
   const data = new Float32Array(n * n), s2 = sc.ns;
   for (let iy = 0; iy < n; iy++) {
-    const zl = zlAt(lam + slope * (iy - n / 2)) * sc.shape * tf;
+    const zl = zlRow(iy), dglK = dglPerFir(lamRow(iy));      // DGL = far-infrared brightness x conversion at this row's wavelength
     for (let ix = 0; ix < n; ix++) {
       const u = ix + 1 - cp, v = iy + 1 - cp;
       const xi = cd[0] * u + cd[1] * v, eta = cd[2] * u + cd[3] * v;
       const fi = s2 / 2 - xi / sc.sc - 0.5, fj = s2 / 2 - eta / sc.sc - 0.5;
       const i0 = Math.max(0, Math.min(s2 - 2, Math.floor(fi))), j0 = Math.max(0, Math.min(s2 - 2, Math.floor(fj)));
       const tx = Math.min(1, Math.max(0, fi - i0)), ty = Math.min(1, Math.max(0, fj - j0));
-      const a = base[j0 * s2 + i0], b = base[j0 * s2 + i0 + 1], c = base[(j0 + 1) * s2 + i0], d = base[(j0 + 1) * s2 + i0 + 1];
-      data[iy * n + ix] = zl + (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+      data[iy * n + ix] = zl + bilerp(base.rest, s2, i0, j0, tx, ty) + dglK * bilerp(base.fir, s2, i0, j0, tx, ty);
     }
   }
 

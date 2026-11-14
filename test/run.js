@@ -367,4 +367,216 @@ import * as SIMIRSA from "../js/sim-irsa.js";
   });
 }
 
+// ---- sky background: zodiacal light, diffuse Galactic light, extragalactic light (paper Sec. 4) ----
+import * as BG from "../js/sky-background.js";
+{
+  // Zodiacal light as the survey sees it: Sun 90 degrees to either side, averaged over ecliptic longitude.
+  const zl = (lat, lam, steps = 160) => {
+    let s = 0, n = 0;
+    for (let lon = 0; lon < 360; lon += 45) for (const side of [-1, 1]) {
+      s += new BG.Los(steps).fill(lon * D2R, lat * D2R, lon * D2R + side * Math.PI / 2, 1).at(lam); n++;
+    }
+    return s / n;
+  };
+  const lams = [0.75, 1.25, 3.1, 5.0];
+  const pole = lams.map((l) => zl(90, l)), ecl = lams.map((l) => zl(0, l));
+
+  test("zodiacal light at the ecliptic poles follows the spectrum of the paper's Fig. 6", () => {
+    // Read off Fig. 6: log10 I(MJy/sr) is about -0.95 at 0.75 um, about -1.3 near 3 um, between -0.5 and -0.3 at 5 um.
+    near(Math.log10(pole[0]), -0.95, 0.12, "0.75 um");
+    near(Math.log10(pole[2]), -1.3, 0.15, "3.1 um");
+    assert.ok(Math.log10(pole[3]) > -0.6 && Math.log10(pole[3]) < -0.25, "5 um: " + Math.log10(pole[3]));
+    assert.ok(pole[2] < pole[0] && pole[2] < pole[3], "the spectrum has its minimum between 1 and 5 um");
+  });
+  test("zodiacal light is 2 to 4 times brighter on the ecliptic than at the poles, less so at long wavelengths", () => {
+    const r = ecl.map((v, i) => v / pole[i]);
+    for (const x of r) assert.ok(x > 2 && x < 4, "ratio " + x);
+    assert.ok(r[3] < r[0], "smaller variation at 5 um than at 0.75 um");
+  });
+  test("the line-of-sight integral has converged at the step counts the app uses (96 and 240)", () => {
+    for (const lat of [0, 30, 90]) for (const lam of [1.25, 4.12]) {
+      const a = zl(lat, lam, 96), b = zl(lat, lam, 240), c = zl(lat, lam, 600);
+      assert.ok(Math.abs(a / c - 1) < 0.03 && Math.abs(b / c - 1) < 0.02, `lat ${lat} lam ${lam}: ${a} ${b} ${c}`);
+    }
+  });
+  test("Earth's longitude and distance from the date: equinox, perihelion, aphelion", () => {
+    near(BG.earthState(51623.316).lon / D2R, 180, 0.7, "March equinox 2000: the Sun is at longitude 0, so Earth is at 180");
+    near(BG.earthState(51547).r, 0.983, 0.002, "perihelion");
+    near(BG.earthState(51729).r, 1.017, 0.002, "aphelion");
+  });
+  test("Kelsall albedo is zero at 4.9 um and the phase function integrates to 1 over the sphere", () => {
+    assert.equal(BG.zlParams(4.9).A, 0);
+    const p = BG.zlParams(1.25);
+    let sum = 0;
+    for (let i = 0; i < 20000; i++) { const th = (i + 0.5) / 20000 * Math.PI; sum += BG.zlPhase(p, th) * 2 * Math.PI * Math.sin(th) * (Math.PI / 20000); }
+    near(sum, 1, 1e-3, "phase function normalisation");
+  });
+
+  test("DGL conversion: nW m-2 sr-1 per MJy sr-1 turns into MJy/sr with nu = c / lambda", () => {
+    for (const lam of [0.75, 1.25, 3.3, 5.0]) near(BG.dglPerFir(lam) * 2.99792458e3 / lam, BG.nuBnu(lam), 1e-9);
+    assert.ok(BG.nuBnu(1.0) > 5 && BG.nuBnu(1.0) < 12, "the paper: about 10 nW m-2 sr-1 per MJy/sr in the near-infrared");
+  });
+  test("DGL has the broad 3.3 um PAH feature and is strongest at the shortest wavelengths", () => {
+    assert.ok(BG.dglPerFir(3.3) > 2.5 * BG.dglPerFir(3.0), "PAH bump");
+    assert.ok(BG.nuBnu(0.75) > BG.nuBnu(2.0) && BG.nuBnu(2.0) > BG.nuBnu(5.0) * 1.2, "falls from the optical towards 5 um");
+  });
+  test("EBL level sits inside the colour range of the paper's Fig. 7 and its clumpiness factor has mean 1", () => {
+    const l = Math.log10(BG.eblMean(1.62));
+    assert.ok(l > -3.2 && l < -2.4, "log10 EBL " + l);
+    let m = 0;
+    for (let g = -7; g <= 7; g += 0.01) m += BG.eblFactor(g) * Math.exp(-g * g / 2) / Math.sqrt(2 * Math.PI) * 0.01;
+    near(m, 1, 2e-3, "mean of the log-normal factor");
+  });
+
+  const map = await BG.zodiacalSurveyMap([1.25, 4.12]);
+  test("survey-geometry zodiacal map is finite, wraps in longitude and is brighter on the ecliptic", () => {
+    for (const lat of [-80, -10, 0, 10, 45, 80]) for (const lon of [0, 1, 3, 6]) for (const k of [0, 1]) assert.ok(Number.isFinite(map.at(lon, lat * D2R, k)));
+    near(map.at(0, 0.3, 1), map.at(2 * Math.PI, 0.3, 1), 1e-9, "longitude wrap");
+    assert.ok(map.at(1, 0, 1) > 1.8 * map.at(1, Math.PI / 2, 1), "ecliptic vs pole");
+  });
+
+  // components of the simulated all-sky map
+  assert.deepEqual(SIMSKY.parseComps("zl,ebl"), { zl: true, dgl: false, ebl: true, stars: false });
+  const sky = (comp, band = "D5") => SIMSKY.renderFromParams(new URLSearchParams({ hips: "x/" + band, width: "64", height: "32", fov: "360", projection: "CAR", ra: "0", dec: "0", comp }));
+  const px = (img, ra, dec) => img.data[(Math.round((0.5 - dec / 180) * 32) * 64 + Math.round((0.5 - ra / 360) * 64)) * 4];
+  const zlOnly = await sky("zl"), none = await sky("none"), eblOnly = await sky("ebl"), dglOnly = await sky("dgl");
+  const allOn = await sky("zl,dgl,ebl", "color");
+  test("the display uses matplotlib's magma: black at 0, pale yellow at 1, and brighter all the way up", () => {
+    const o = [0, 0, 0], lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    SIMSKY.magma(0, o); assert.deepEqual([...o], [0, 0, 0]);
+    SIMSKY.magma(1, o); assert.deepEqual([...o], [0xfc, 0xfd, 0xbf]);
+    SIMSKY.magma(0.5, o); assert.deepEqual([...o].map((v) => Math.round(v / 8)), [0xb7, 0x37, 0x79].map((v) => Math.round(v / 8)), "mid-scale is magenta, as in Fig. 2");
+    let prev = -1;
+    for (let t = 0.01; t <= 1; t += 0.01) { SIMSKY.magma(t, o); const y = lum(o); assert.ok(y >= prev - 0.5, "luminance at " + t); prev = y; }
+  });
+  test("the zodiacal light at the ecliptic poles falls inside each band's colour bar of the paper's Fig. 2", () => {
+    assert.deepEqual(SIMSKY.PAPER_RANGE, [[-1, -0.7], [-1, -0.7], [-1.4, -0.8], [-1.4, -1], [-1.2, -0.6], [-0.8, -0.3]]);
+    const los = new BG.Los(160).fill(0, Math.PI / 2, Math.PI / 2, 1);
+    SIMSKY.BAND_LAMS.forEach((lam, k) => {
+      const l = Math.log10(los.at(lam)), [lo, hi] = SIMSKY.PAPER_RANGE[k];
+      assert.ok(l >= lo - 0.05 && l <= hi + 0.05, `band D${k + 1}: log10 ZL ${l.toFixed(2)} outside [${lo}, ${hi}]`);
+    });
+  });
+  test("the colour composite is dark purple at the ecliptic pole, not a pink wash, and brighter along the ecliptic", () => {
+    const rgb = (ra, dec) => { const i = (Math.round((0.5 - dec / 180) * 32) * 64 + Math.round((0.5 - ra / 360) * 64)) * 4; return [...allOn.data.slice(i, i + 3)]; };
+    const pole = rgb(270, 66.56), ecl = rgb(90, 23.4), lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    assert.ok(lum(pole) < 70 && pole[2] > pole[1], "pole " + pole);          // dark, and bluer than green: the purple end of magma
+    assert.ok(lum(ecl) > lum(pole) + 25, `ecliptic ${ecl} vs pole ${pole}`);
+  });
+  test("switching every component off gives a black sky", () => {
+    assert.equal(Math.max(...none.data.filter((_, i) => i % 4 !== 3)), 0);
+    assert.equal(SIMSKY.compsToString(SIMSKY.parseComps("")), "zl,dgl,ebl,stars");
+  });
+  test("zodiacal light alone is smooth and follows the ecliptic: brighter at RA 0 Dec 0 than at the ecliptic pole", () => {
+    assert.ok(px(zlOnly, 0, 0) > px(zlOnly, 270, 66.56) + 10, px(zlOnly, 0, 0) + " vs " + px(zlOnly, 270, 66.56));
+  });
+  // mean red value over a patch of sky (+-20 deg in RA, +-12 deg in Dec); averaging removes the single-pixel clumpiness
+  const patch = (img, ra, dec) => {
+    let s = 0, n = 0;
+    for (let j = 0; j < 32; j++) for (let i = 0; i < 64; i++) {
+      const r = (0.5 - i / 64) * 360, d = (0.5 - j / 32) * 180;
+      if (Math.abs(((r - ra + 540) % 360) - 180) < 20 && Math.abs(d - dec) < 12) { s += img.data[(j * 64 + i) * 4]; n++; }
+    }
+    return s / n;
+  };
+  test("DGL alone follows the Galactic plane, EBL alone is faint and has no Galactic plane", () => {
+    assert.ok(patch(dglOnly, 266.4, -29) > patch(dglOnly, 192.9, 27.1) + 40, "DGL: galactic centre vs pole");
+    const e = [patch(eblOnly, 266.4, -29), patch(eblOnly, 192.9, 27.1)];
+    assert.ok(Math.abs(e[0] - e[1]) < 25 && e[0] > 0 && e[1] > 0, "EBL " + e);
+  });
+}
+
+// ---- live stars: sharp points, fainter ones appear as you zoom in (js/star-layer.js) ----
+import * as SL from "../js/star-layer.js";
+{
+  const lat = 23.81, lst = lstRad(Date.UTC(2026, 10, 14, 13, 0, 0), 90.41);
+  const eq0 = { ra: 83.8, dec: -5.4 };
+  const aimedView = (fovDeg, proj = 0) => {
+    const v = new View(); v.resize(1100, 700); v.proj = proj; v.fov = Math.min(fovDeg * D2R, v.maxFov);
+    v.lookAtVec(eqToAltAzVec(eq0.ra, eq0.dec, lat, lst));
+    return v;
+  };
+  const stubCtx = () => { const c = { rects: 0, arcs: 0, fillStyle: "" };
+    Object.assign(c, { beginPath() {}, moveTo() {}, fill() {}, fillRect() {}, rect() { c.rects++; }, arc() { c.arcs++; }, createRadialGradient: () => ({ addColorStop() {} }) });
+    return c; };
+
+  test("the star projection gives the same pixels as the camera's own project(), in both projections", () => {
+    for (const proj of [0, 1]) for (const fovDeg of [120, 40, 5, 0.3]) {
+      const v = aimedView(fovDeg, proj), P = SL.makeProjector(v, lat, lst), out = [0, 0, 0];
+      let compared = 0;
+      for (let i = 0; i < 2000; i++) {
+        const ra = (i * 137.5) % 360, dec = Math.asin(((i * 0.618) % 2) - 1) / D2R, cd = Math.cos(dec * D2R);
+        const a = v.project(eqToAltAzVec(ra, dec, lat, lst));
+        if (!a || !P(cd * Math.cos(ra * D2R), cd * Math.sin(ra * D2R), Math.sin(dec * D2R), out)) continue;
+        near(out[0], a[0], 1e-5, "x"); near(out[1], a[1], 1e-5, "y"); compared++;
+      }
+      assert.ok(compared > 20 || fovDeg < 1, `fov ${fovDeg}: compared ${compared}`);
+    }
+  });
+  test("the faintest star drawn gets fainter as you zoom in, and never passes the floor", () => {
+    const lims = [150, 60, 20, 5, 1, 0.3, 0.1].map((f) => SL.viewLimit(f * D2R, 1.6));
+    for (let i = 1; i < lims.length; i++) assert.ok(lims[i] <= lims[i - 1], "limits " + lims);
+    assert.ok(lims[0] > 3 && lims[0] < 20, "wide view shows roughly the naked-eye stars: " + lims[0]);
+    assert.equal(lims[lims.length - 1], SL.STAR_FLOOR);
+  });
+  test("zooming in only adds stars: a deeper catalogue contains every star of a shallower one, at the same place", () => {
+    const a = SIMSKY.gatherStars(eq0.ra, eq0.dec, 3, 0.5, 100000), b = SIMSKY.gatherStars(eq0.ra, eq0.dec, 3, 0.02, 100000);
+    const key = (s, i) => s.ra[i].toFixed(6) + "," + s.dec[i].toFixed(6), deep = new Set();
+    for (let i = 0; i < b.n; i++) deep.add(key(b, i));
+    for (let i = 0; i < a.n; i++) assert.ok(deep.has(key(a, i)), "a star moved or vanished");
+    assert.ok(b.n > 3 * a.n, `${a.n} -> ${b.n}`);
+  });
+  test("the live layer draws a sensible number of stars at every zoom, within its budget, and keeps them on screen", () => {
+    for (const fovDeg of [150, 60, 20, 5, 1]) {
+      const v = aimedView(fovDeg), L = new SL.StarLayer(), c = stubCtx();
+      L.update(v, eq0, 1000); L.draw(c, v, lat, lst, {});
+      assert.ok(L.drawn > 100 && L.drawn <= SL.STAR_BUDGET * 1.2, `fov ${fovDeg}: drawn ${L.drawn}`);
+      assert.equal(c.rects + c.arcs, L.drawn, "every star drawn as one rect or one arc");
+    }
+  });
+  test("stars below the horizon are hidden when the ground is on, and the layer does nothing when disabled", () => {
+    const v = aimedView(150), L = new SL.StarLayer();
+    L.update(v, eq0, 1000);
+    L.draw(stubCtx(), v, lat, lst, {}); const all = L.drawn;
+    L.draw(stubCtx(), v, lat, lst, { hideBelow: true });
+    assert.ok(L.drawn < all && L.drawn > 0, `${L.drawn} of ${all}`);
+    L.enabled = false; L.draw(stubCtx(), v, lat, lst, {});
+    assert.equal(L.drawn, 0);
+  });
+  test("the layer keeps its catalogue while you pan a little, and builds a new one when you zoom or move far", () => {
+    const v = aimedView(10), L = new SL.StarLayer();
+    L.update(v, eq0, 1000); const first = L.cache;
+    L.update(v, { ra: eq0.ra + 0.5, dec: eq0.dec }, 2000); assert.equal(L.cache, first, "small pan reuses the catalogue");
+    L.update(v, { ra: eq0.ra + 40, dec: eq0.dec }, 3000); assert.notEqual(L.cache, first, "a long move builds a new one");
+    const second = L.cache; v.fov = 1 * D2R; L.update(v, { ra: eq0.ra + 40, dec: eq0.dec }, 4000);
+    assert.notEqual(L.cache, second, "zooming past the depth of the catalogue builds a deeper one");
+  });
+  test("the colour composite gives hot stars a blue tint and cool stars a red one; a single band gives white", () => {
+    const L = new SL.StarLayer(), rgb = L.tables.rgb, cool = rgb[0], hot = rgb[rgb.length - 1];
+    assert.ok(hot[2] > hot[0] && cool[0] > cool[2], `cool ${cool} hot ${hot}`);
+    L.setBand("D3");
+    assert.deepEqual(L.tables.rgb[0], L.tables.rgb[23]);
+  });
+  const ptsParams = (pts) => new URLSearchParams({ hips: "x/D3", width: "96", height: "48", fov: "360", projection: "CAR", ra: "0", dec: "0", comp: "stars", pts });
+  const withPts = await SIMSKY.renderFromParams(ptsParams("1")), noPts = await SIMSKY.renderFromParams(ptsParams("0"));
+  test("the sky image carries no point stars when asked (pts=0), so only the live layer draws them", () => {
+    let brighter = 0, maxDiff = 0;
+    const lum = (a, i) => 0.299 * a[i] + 0.587 * a[i + 1] + 0.114 * a[i + 2];      // rises steadily along magma, unlike red alone
+    for (let i = 0; i < withPts.data.length; i += 4) {
+      const d = lum(withPts.data, i) - lum(noPts.data, i);
+      assert.ok(d >= -0.5, "leaving the points out never makes a pixel brighter");
+      if (d > 10) brighter++;
+      maxDiff = Math.max(maxDiff, d);
+    }
+    assert.ok(brighter > 100 && maxDiff > 60, `${brighter} pixels brighter with points, at most by ${maxDiff}`);
+  });
+  test("the Sun, Moon and planets are no longer drawn as dots, but their positions are still computed", () => {
+    const calls = []; const ctx = new Proxy({}, { get: (_, k) => (...a) => { calls.push(k); }, set: () => true });
+    const ss = new SS.SolarSystem({ say() {}, busy() {}, status() {} });
+    ss.draw(ctx, aimedView(150), lat, lst, { asteroids: false, neo: false, hideBelow: false });
+    assert.ok(!calls.includes("arc") && !calls.includes("fillText"), "nothing drawn: " + calls.slice(0, 5));
+    assert.ok(SS.majorBodies(Date.UTC(2026, 10, 14)).length >= 9, "positions still available");
+  });
+}
+
 console.log(`\n${passed} tests passed`);

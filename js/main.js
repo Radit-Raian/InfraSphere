@@ -13,6 +13,7 @@ import * as UI from "./ui.js";
 import { TileGrid } from "./tiles.js";
 import { SolarSystem } from "./solar-system.js";
 import { Inspector } from "./inspector.js";
+import { StarLayer } from "./star-layer.js";
 
 const $ = UI.$;
 
@@ -21,8 +22,8 @@ const state = {
   lat: CONFIG.location.lat, lon: CONFIG.location.lon,
   simMs: Date.now(), speed: 1,
   ground: true, grid: true, eqGrid: false, galGrid: false, directions: true, flip: false,
-  tiles: false, planets: true, asteroids: false, neo: false,
-  expo: 1.4, gam: 1.0,
+  tiles: false, asteroids: false, neo: false,
+  expo: 1.0, gam: 1.0,
   quality: 2, sharpen: true,
   band: "color",
   groups: { star: true, galaxy: true, cluster: true, nebula: true, other: false },
@@ -44,6 +45,10 @@ const sky = new SkyData(renderer, UI.ui);
 const feed = new LabelFeed(layer, UI.ui);
 const tiles = new TileGrid();
 const solar = new SolarSystem(UI.ui);
+// Live stars: sharp points, with fainter ones appearing as you zoom in. Simulated sky only; the real SPHEREx maps have
+// their stars in the picture, so they cannot be drawn this way.
+const stars = new StarLayer();
+stars.enabled = CONFIG.simulate;
 const inspector = new Inspector(UI.ui);
 UI.setInspectHandler((ra, dec, title) => inspector.open({ ra, dec, title }));
 
@@ -150,8 +155,18 @@ const controls = attachControls($("sky"), view, {
 });
 
 // ---------- panel wiring ----------
-UI.buildBandButtons((id) => { state.band = id; UI.setActiveBand(id); sky.loadBand(id, state.quality); });
+UI.buildBandButtons((id) => { state.band = id; UI.setActiveBand(id); stars.setBand(id); sky.loadBand(id, state.quality); });
 $("quality").addEventListener("change", (e) => { state.quality = parseInt(e.target.value, 10); sky.loadBand(state.band, state.quality); });
+// Background light components of the simulated sky (zodiacal, diffuse Galactic, extragalactic, stars and sources)
+const BG = { zl: "bg-zl", dgl: "bg-dgl", ebl: "bg-ebl", stars: "bg-stars" };
+for (const [comp, id] of Object.entries(BG)) {
+  $(id).addEventListener("change", () => {
+    const comps = Object.fromEntries(Object.entries(BG).map(([c, i]) => [c, $(i).checked]));
+    stars.enabled = CONFIG.simulate && comps.stars;
+    if (sky.setComps(comps)) sky.loadBand(state.band, state.quality);
+  });
+}
+if (CONFIG.simulate === false) for (const id of Object.values(BG)) { $(id).disabled = true; }
 $("sharp").addEventListener("change", (e) => { state.sharpen = e.target.checked; if (!state.sharpen) renderer.clearPatch(); });
 
 $("lat").value = state.lat; $("lon").value = state.lon;
@@ -177,7 +192,6 @@ $("grid").addEventListener("change", (e) => { state.grid = e.target.checked; });
 $("eqgrid").addEventListener("change", (e) => { state.eqGrid = e.target.checked; });
 $("galgrid").addEventListener("change", (e) => { state.galGrid = e.target.checked; });
 $("tilegrid").addEventListener("change", (e) => { state.tiles = e.target.checked; if (!state.tiles) state.tile = null; });
-$("planets").addEventListener("change", (e) => { state.planets = e.target.checked; });
 $("asteroids").addEventListener("change", (e) => { state.asteroids = e.target.checked; });
 $("neo").addEventListener("change", (e) => { state.neo = e.target.checked; });
 $("dirs").addEventListener("change", (e) => { state.directions = e.target.checked; });
@@ -193,7 +207,7 @@ $("searchBtn").addEventListener("click", () => searchObject($("search").value));
 $("toggle").addEventListener("click", () => $("panel").classList.toggle("hidden"));
 if (window.innerWidth < 700) $("panel").classList.add("hidden");
 if (CONFIG.simulate) {
-  $("credits").textContent = "SIMULATED sky: a procedural model after the SPHEREx Sky Simulator (Crill et al. 2025, ApJS 281, 10), not real survey data. Add ?real=1 to the address for NASA/JPL-Caltech data. Object data: SIMBAD, CDS.";
+  $("credits").textContent = "SIMULATED sky (magma colour scale, build 2): a procedural model after the SPHEREx Sky Simulator (Crill et al. 2025, ApJS 281, 10), not real survey data. Add ?real=1 to the address for NASA/JPL-Caltech data. Object data: SIMBAD, CDS.";
   document.title = "InfraSphere (simulated sky)";
 }
 
@@ -214,19 +228,21 @@ function tick(now) {
 
   renderer.render(view, L, state.lat, state);
 
+  const eq = centerEq();
   const ctx = labelCtx;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, view.W, view.H);
+  stars.update(view, eq, now);
+  stars.draw(ctx, view, state.lat, L, { hideBelow: state.ground });
   if (state.tiles) tiles.draw(ctx, view, state.lat, L, { selected: state.tile });
   if (state.directions) drawDirections(ctx, view);
   layer.draw(ctx, view, state.lat, L, {
     groups: state.groups, showLabels: true, hideBelow: state.ground,
-    maxDrawn: CONFIG.labels.maxDrawn, selected: state.selected
+    maxDrawn: CONFIG.labels.maxDrawn, selected: state.selected, starDots: stars.enabled
   });
   solar.update(state.simMs, { asteroids: state.asteroids, neo: state.neo });
-  solar.draw(ctx, view, state.lat, L, { planets: state.planets, asteroids: state.asteroids, neo: state.neo, hideBelow: state.ground });
+  solar.draw(ctx, view, state.lat, L, { asteroids: state.asteroids, neo: state.neo, hideBelow: state.ground });
 
-  const eq = centerEq();
   sky.maybeSharpen({ now, idle: isIdle(now, CONFIG.patch.idleMs), enabled: state.sharpen, flip: state.flip, view, centerEq: eq });
   feed.maybeUpdate({ now, idle: isIdle(now, CONFIG.labels.idleMs), enabled: true, view, centerEq: eq });
 

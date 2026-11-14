@@ -5,13 +5,14 @@
 
 import { CONFIG } from "./config.js";
 import { angSepDeg } from "./astro.js";
-import { renderSimImage } from "./sim-sky.js";
+import { renderSimImage, ALL_COMPONENTS, compsToString } from "./sim-sky.js";
 
 export class SkyData {
   constructor(renderer, ui) {
     this.renderer = renderer;
     this.ui = ui;
     this.band = "color";
+    this.comps = { ...ALL_COMPONENTS };      // which background components the simulated sky includes
     this.cache = new Map();
     this.token = 0;
     this.ctl = null;
@@ -30,6 +31,17 @@ export class SkyData {
 
   _label(id) { return id === "color" ? "color composite" : id; }
 
+  /** Turn background components on or off (simulated sky only). Returns true if anything changed. */
+  setComps(comps) {
+    const a = compsToString(this.comps), b = compsToString(comps);
+    if (a === b) return false;
+    this.comps = { ...comps };
+    return true;
+  }
+
+  // pts=0: the sky image holds only the smooth diffuse light; the stars are drawn live by js/star-layer.js, so they stay sharp.
+  _withComps(params) { if (CONFIG.simulate) { params.set("comp", compsToString(this.comps)); params.set("pts", "0"); } return params; }
+
   async loadBand(id, level) {
     this.band = id;
     if (this.ctl) this.ctl.abort();
@@ -40,14 +52,14 @@ export class SkyData {
     const sizes = (CONFIG.baseLevels[level] || CONFIG.baseLevels[2]).filter((w) => w <= this.renderer.maxTex);
     try {
       for (let i = 0; i < sizes.length; i++) {
-        const width = sizes[i], key = id + ":" + width;
+        const width = sizes[i], key = id + ":" + width + ":" + compsToString(this.comps);
         let bmp = this.cache.get(key);
         if (!bmp) {
           this.ui.setBusy("sky", (CONFIG.simulate ? "Building simulated " : "Loading ") + this._label(id) + " sky (" + width + " px)" + (i > 0 ? ", sharpening" : ""));
-          bmp = await this._fetchImage(new URLSearchParams({
+          bmp = await this._fetchImage(this._withComps(new URLSearchParams({
             hips: CONFIG.hipsRoot + id, width: String(width), height: String(width / 2),
             fov: "360", projection: "CAR", coordsys: "icrs", ra: "0", dec: "0", format: "jpg"
-          }), ctl.signal);
+          })), ctl.signal);
           this.cache.set(key, bmp);
         }
         if (token !== this.token) return;
@@ -84,11 +96,11 @@ export class SkyData {
     this.patchCtl = new AbortController();
     this.ui.setBusy("patch", "Sharpening this part of the sky");
     try {
-      const bmp = await this._fetchImage(new URLSearchParams({
+      const bmp = await this._fetchImage(this._withComps(new URLSearchParams({
         hips: CONFIG.hipsRoot + this.band, width: String(P.size), height: String(P.size),
         fov: fovDeg.toFixed(3), projection: "TAN", coordsys: "icrs",
         ra: centerEq.ra.toFixed(5), dec: centerEq.dec.toFixed(5), format: "jpg"
-      }), this.patchCtl.signal);
+      })), this.patchCtl.signal);
       if (bandAtStart === this.band) {
         this.patch = { ra: centerEq.ra, dec: centerEq.dec, fov: fovDeg };
         this.renderer.setPatch(bmp, this.patch);

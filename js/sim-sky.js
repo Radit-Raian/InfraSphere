@@ -7,7 +7,11 @@
 //   extended sources LMC, SMC, M31, M33, Orion, Carina ... as simple elliptical profiles (Sec 4.4)
 //   instrument       the six detectors, their band edges, PSF widths and 17 spectral channels (Table 2, Figs 18-19)
 // It is a look-alike for browsing, not a calibrated simulation. Everything is deterministic: same request, same pixels.
+// The three diffuse backgrounds (zodiacal light, diffuse Galactic light, extragalactic light) live in
+// js/sky-background.js and follow Section 4 of the paper; this file adds them to the stars and extended sources.
 // No DOM at import time, so it can be tested in Node.
+
+import { zodiacalSurveyMap, dglBandPerFir, FIR_HIGH_LAT_MJY, eblMean, eblFactor } from "./sky-background.js";
 
 const D2R = Math.PI / 180, R2D = 180 / Math.PI, TWO_PI = 2 * Math.PI;
 
@@ -22,8 +26,45 @@ export const BANDS = [
 ];
 export const bandIndex = (id) => BANDS.findIndex((b) => b.id === id);
 
-// Display: zodiacal light is mostly subtracted so the Milky Way and stars show, then an asinh stretch.
-export const SIM = { zodiSubtract: 0.97, soft: 0.05, white: 20, starBudget: 150000 };
+// Display: the scale of the paper's Fig. 2 (see PAPER_RANGE and magma below). `soft` (MJy/sr) only picks how far the
+// scale moves down when the zodiacal light is switched off (see stretchSoft); `headroom` (dex) lifts the top of every
+// band's range so that the ecliptic, about 0.5 dex brighter than the pole, is not all saturated in an all-sky view.
+export const SIM = { soft: 0.05, headroom: 0.5, starBudget: 150000 };
+
+/** The colour bars of the paper's Fig. 2, log10(MJy/sr), for bands D1 to D6. */
+export const PAPER_RANGE = [[-1.0, -0.7], [-1.0, -0.7], [-1.4, -0.8], [-1.4, -1.0], [-1.2, -0.6], [-0.8, -0.3]];
+
+// matplotlib's "magma" colour map (the one Fig. 2 uses), as 48 stops from 0 to 1, interpolated to 256 entries.
+const MAGMA_STOPS = ("000004 02020b 050416 0a0822 100b2d 160f3b 1d1147 251255 2d1161 38106c 400f74 491078 52137c 5a167e 641a80 6b1d81 " +
+  "752181 7c2382 862781 8e2a81 962c80 a02f7f a8327d b2357b ba3878 c43c75 cc3f71 d5446d dc4869 e34e65 ea5661 ef5d5e " +
+  "f4675c f7705c f97b5d fb8560 fc9065 fd9a6a fea36f feae77 feb77e fec287 fecc8f fed799 fde0a1 fdebac fcf4b6 fcfdbf").split(" ")
+  .map((h) => [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)));
+const MAGMA = (() => {
+  const lut = new Uint8ClampedArray(256 * 3), n = MAGMA_STOPS.length - 1;
+  for (let i = 0; i < 256; i++) {
+    const x = (i / 255) * n, j = Math.min(n - 1, Math.floor(x)), f = x - j;
+    for (let c = 0; c < 3; c++) lut[i * 3 + c] = MAGMA_STOPS[j][c] * (1 - f) + MAGMA_STOPS[j + 1][c] * f;
+  }
+  return lut;
+})();
+/** Writes the magma colour for t (0 to 1) into out[o..o+2]. Anything at or below 0 is black. */
+export function magma(t, out, o = 0) {
+  if (!(t > 0)) { out[o] = out[o + 1] = out[o + 2] = 0; return; }
+  const i = (Math.min(1, t) * 255 + 0.5 | 0) * 3;
+  out[o] = MAGMA[i]; out[o + 1] = MAGMA[i + 1]; out[o + 2] = MAGMA[i + 2];
+}
+
+// Sky components that can be switched on and off. "stars" covers stars, the unresolved starlight of the Milky Way
+// and the extended galaxies and nebulae.
+export const COMPONENTS = ["zl", "dgl", "ebl", "stars"];
+export const ALL_COMPONENTS = { zl: true, dgl: true, ebl: true, stars: true };
+/** "zl,dgl" -> { zl: true, dgl: true, ebl: false, stars: false }. Nothing given means everything; "none" means nothing. */
+export function parseComps(text) {
+  if (text === null || text === undefined || text === "") return { ...ALL_COMPONENTS };
+  const set = new Set(String(text).split(","));
+  return Object.fromEntries(COMPONENTS.map((c) => [c, set.has(c)]));
+}
+export const compsToString = (c) => COMPONENTS.filter((k) => c[k]).join(",") || "none";
 
 // ---------- small utilities ----------
 export function mulberry32(seed) {
@@ -87,23 +128,27 @@ export function eclOf(raDeg, decDeg) {
 
 // ---------- spectral model ----------
 const C = BANDS.map((b) => b.c);
-const lerpTable = (xs, ys, x) => {
-  if (x <= xs[0]) return ys[0];
-  for (let i = 1; i < xs.length; i++) if (x <= xs[i]) { const t = (x - xs[i - 1]) / (xs[i] - xs[i - 1]); return ys[i - 1] + t * (ys[i] - ys[i - 1]); }
-  return ys[ys.length - 1];
-};
-// log10 zodiacal light (MJy/sr) near mid ecliptic latitude, read off the paper's Fig 6
-const ZL_L = [0.75, 1.0, 1.3, 1.6, 2.0, 2.5, 3.0, 3.4, 3.8, 4.2, 4.6, 5.0];
-const ZL_LOG = [-0.95, -0.93, -0.95, -1.0, -1.12, -1.25, -1.30, -1.28, -1.15, -0.80, -0.48, -0.28];
-export const zlAt = (lam) => Math.pow(10, lerpTable(ZL_L, ZL_LOG, lam));
-/** Ecliptic-latitude dependence: 1.5 on the ecliptic, 0.5 at the pole (a factor of ~3, as in the paper). */
-export const zlShapeOfBeta = (betaRad) => (1 + 2 * Math.cos(betaRad) ** 2) / 2;
+/** Wavelengths at which the zodiacal light is evaluated for the all-sky maps: the six band centres. */
+export const BAND_LAMS = C;
 
 const TAU = C.map((l) => 9 * Math.pow(0.55 / l, 1.7));                                    // dust optical depth per unit column
-const PAH = (l) => Math.exp(-(((l - 3.3) / 0.25) ** 2));
 const GLOW = [0.45, 0.5, 0.45, 0.3, 0.19, 0.11];                                              // unresolved starlight (MJy/sr)
-const EM = C.map((l) => 0.01 + 0.5 * PAH(l) + 0.05 * Math.pow(l / 4.7, 6));                 // dust emission, PAH at 3.3 um
-const SC = C.map((l) => 0.05 * Math.pow(1 / l, 1.5));                                        // scattered starlight (DGL)
+
+// Diffuse Galactic light (paper Sec. 4.2): I_DGL = (far-infrared brightness) x (conversion spectrum). Per band the
+// conversion is averaged over the band's 17 spectral channels, so the 3.3 um PAH feature shows up in band 4.
+const DGL_PER_FIR = BANDS.map((b) => dglBandPerFir(b.ch));
+// Extragalactic background light (paper Sec. 4.4): a faint, clumpy, nearly flat floor.
+const EBL_MEAN = C.map((l) => eblMean(l));
+// Far-infrared (100 um) brightness template, MJy/sr = FIR_FLOOR + FIR_SCALE x dust column. The floor keeps the
+// Galactic poles from being exactly dark; FIR_SCALE then puts the median of the high-latitude sky (|b| > 30 deg) at
+// FIR_HIGH_LAT_MJY (about 1 MJy/sr, the value the paper quotes). The Galactic centre comes out near 150 MJy/sr.
+export const FIR_FLOOR = 0.3;
+export const FIR_SCALE = ((FIR_HIGH_LAT_MJY - FIR_FLOOR) / 1.354e-2);   // 1.354e-2: median dust column at |b| > 30 deg
+// Turns the fbm() noise of the EBL into a unit-variance variate (measured: its log-normal width then comes out at 0.25).
+const EBL_GAIN = 8.14;
+// The paper's DGL has no structure below ~5 arcmin. The dust noise is built from at most 7 octaves; the finest has
+// cells of 1 / (12 * 2.02^6) rad = 4.3 arcmin, however far the view is zoomed in.
+const MAX_DUST_OCT = 7;
 
 // Extended objects: position, size (deg), position angle, peak MJy/sr in D1..D6.
 const GAL_SPEC = [0.7, 0.8, 0.7, 0.5, 0.2, 0.2], NEB_SPEC = [0.3, 0.35, 0.45, 1.2, 1.4, 1.6];
@@ -128,21 +173,26 @@ const OBJS = [
 });
 
 // ---------- the diffuse field at one direction ----------
-export const FIELD = { dust: 0, glow: 0, shape: 0 };
+// dust: Galactic dust column (also drives the extinction and the nebula filaments); fir: far-infrared brightness,
+// MJy/sr; ebl: EBL clumpiness multiplier; glow: unresolved starlight; elon / elat: ecliptic coordinates, radians.
+export const FIELD = { dust: 0, fir: 0, ebl: 1, glow: 0, elon: 0, elat: 0 };
 const EXT = new Float64Array(OBJS.length);
 
-/** Fills FIELD (dust column, unresolved starlight, zodiacal shape) and EXT (extended-object profiles) for a unit vector. */
+/** Fills FIELD and EXT (extended-object profiles) for a unit vector. */
 export function fieldAt(x, y, z, oct) {
   const g = galOf(x, y, z), ab = Math.abs(g.b), lw = g.l;
-  const ez = -y * SE + z * CE;
-  FIELD.shape = (1 + 2 * (1 - ez * ez)) / 2;
-  let n = fbm(g.gx * 12, g.gy * 12, g.gz * 12, oct, 11);
+  const ey = y * CE + z * SE, ez = -y * SE + z * CE;
+  FIELD.elon = Math.atan2(ey, x); FIELD.elat = Math.asin(Math.max(-1, Math.min(1, ez)));
+  let n = fbm(g.gx * 12, g.gy * 12, g.gz * 12, Math.min(oct, MAX_DUST_OCT), 11);
   n = clamp01(0.5 + (n - 0.5) * 2.2);
   const clump = smooth(0.3, 0.85, n);
   const disk = Math.exp(-ab / 0.0873), thick = Math.exp(-ab / 0.31);
   FIELD.dust = disk * (0.12 + 1.4 * clump) * (1 + 1.2 * Math.exp(-lw * lw / 0.36)) + 0.10 * thick * n * n + 0.09 * n * n * n;
+  FIELD.fir = FIR_FLOOR + FIR_SCALE * FIELD.dust;
   FIELD.glow = Math.exp(-ab / 0.07) * (0.5 + 0.7 * Math.exp(-Math.abs(lw) / 0.9)) +
     2.2 * Math.exp(-(lw * lw / 0.08 + g.b * g.b / 0.02)) + 0.12 * Math.exp(-ab / 0.26);
+  // EBL clumpiness: a log-normal field with cells from about 1 degree down to a few arcmin
+  FIELD.ebl = eblFactor((fbm(x * 60 + 7.7, y * 60 - 3.1, z * 60 + 1.9, Math.min(oct, 5), 23) - 0.5) * EBL_GAIN);
   for (let o = 0; o < OBJS.length; o++) {
     const ob = OBJS[o];
     const dot = x * ob.c[0] + y * ob.c[1] + z * ob.c[2];
@@ -152,10 +202,17 @@ export function fieldAt(x, y, z, oct) {
     EXT[o] = r2 > 60 ? 0 : (0.65 * Math.exp(-0.5 * r2) + 0.35 * Math.exp(-Math.sqrt(r2) * 1.1)) * (ob.neb ? 0.3 + 1.4 * n * n : 1);   // nebulae get filaments from the dust noise
   }
 }
-/** Everything except the zodiacal light, in MJy/sr, for band index k, from the last fieldAt call. */
-export function restValue(k) {
-  let v = GLOW[k] * FIELD.glow * Math.exp(-0.8 * TAU[k] * FIELD.dust) + (EM[k] + SC[k]) * FIELD.dust;
-  for (let o = 0; o < OBJS.length; o++) if (EXT[o] > 0) v += OBJS[o].amp[k] * EXT[o];
+/** Everything except the zodiacal light, in MJy/sr, for band index k, from the last fieldAt call:
+ *  diffuse Galactic light + extragalactic light + unresolved starlight and extended sources.
+ *  comps picks which of them to include (default: all). */
+export function restValue(k, comps = ALL_COMPONENTS) {
+  let v = 0;
+  if (comps.dgl) v += DGL_PER_FIR[k] * FIELD.fir;
+  if (comps.ebl) v += EBL_MEAN[k] * FIELD.ebl;
+  if (comps.stars) {
+    v += GLOW[k] * FIELD.glow * Math.exp(-0.8 * TAU[k] * FIELD.dust);
+    for (let o = 0; o < OBJS.length; o++) if (EXT[o] > 0) v += OBJS[o].amp[k] * EXT[o];
+  }
   return v;
 }
 
@@ -293,7 +350,10 @@ function tanGeom(raDeg, decDeg, fovDeg, W, H) {
 }
 
 // ---------- rendering ----------
-const aborted = (signal) => { if (signal && signal.aborted) { const e = new Error("aborted"); e.name = "AbortError"; throw e; } };
+/** Brightness scale (MJy/sr) of the brightest component switched on. The colour scale moves down by log10(SIM.soft / this),
+ *  so that a faint component shown alone (the EBL is ~100 times fainter than the zodiacal light) is still visible. */
+export function stretchSoft(c) { return c.zl ? SIM.soft : c.stars ? 0.02 : c.dgl ? 0.003 : 0.0003; }
+const aborted =(signal) => { if (signal && signal.aborted) { const e = new Error("aborted"); e.name = "AbortError"; throw e; } };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 function upsample(src, sw, sh, dw, dh, wrapX) {
@@ -313,36 +373,41 @@ function upsample(src, sw, sh, dw, dh, wrapX) {
 }
 
 /**
- * Render one geometry into RGBA bytes.
- * bandIds: ["D2"] gives grey; "color" gives R=D5, G=D3, B=D1 (long wavelengths red, like the real composite).
+ * Render one geometry into RGBA bytes, in the colours of the paper's Fig. 2: log10(MJy/sr) on the magma colour map, with
+ * the range of that band's colour bar. bandId "D2" is one band; "color" averages all six bands, each on its own range.
  */
-async function renderGeom(geom, bandId, { signal, mjd } = {}) {
+async function renderGeom(geom, bandId, { signal, mjd, comps = ALL_COMPONENTS, points = true } = {}) {
   const composite = bandId === "color";
-  const ks = composite ? [4, 2, 0] : [Math.max(0, bandIndex(bandId))];
-  const gains = composite ? [2.2, 1.1, 1.0] : [1];
+  const ks = composite ? [0, 1, 2, 3, 4, 5] : [Math.max(0, bandIndex(bandId))];
   const { W, H } = geom;
   const dw = Math.min(W, geom.wrapX ? 2048 : 384), dh = Math.max(2, Math.min(H, Math.round(H * dw / W)));
   const pixD = geom.pixRad * W / dw;
   const oct = Math.max(2, Math.min(10, Math.floor(Math.log2(0.5 / (pixD * 12))) + 1));
   const dif = ks.map(() => new Float32Array(dw * dh));
-  const zl = ks.map((k) => zlAt(BANDS[k].c));
-  const v = [0, 0, 0], sub = 1 - SIM.zodiSubtract;
+  // Zodiacal light: the survey-geometry map from the Kelsall-model integration (built once, then reused).
+  // No abort signal is passed: the map is shared by every render, so one render's cancel must not break the others.
+  const zlMap = comps.zl ? await zodiacalSurveyMap(BAND_LAMS, { tick }) : null;
+  aborted(signal);
+  const v = [0, 0, 0];
   for (let j = 0; j < dh; j++) {
     for (let i = 0; i < dw; i++) {
       geom.dirUV((i + 0.5) / dw, (j + 0.5) / dh, v);
       fieldAt(v[0], v[1], v[2], oct);
-      for (let c = 0; c < ks.length; c++) dif[c][j * dw + i] = sub * zl[c] * FIELD.shape + restValue(ks[c]);
+      for (let c = 0; c < ks.length; c++) dif[c][j * dw + i] = (zlMap ? zlMap.at(FIELD.elon, FIELD.elat, ks[c]) : 0) + restValue(ks[c], comps);
     }
     if ((j & 15) === 15) { await tick(); aborted(signal); }
   }
 
   const sMin = starLimit(geom.areaDeg2, geom.pixRad * geom.pixRad, SIM.starBudget);
-  const stars = gatherStars(geom.centre[0], geom.centre[1], geom.radDeg, sMin, SIM.starBudget * 2);
+  // points = false leaves the individual stars out: the page draws those itself, sharp at any zoom (js/star-layer.js).
+  // The unresolved starlight and the extended galaxies and nebulae are smooth, so they stay in the image.
+  const stars = comps.stars && points ? gatherStars(geom.centre[0], geom.centre[1], geom.radDeg, sMin, SIM.starBudget * 2) : { n: 0 };
   await tick(); aborted(signal);
 
   const out = new Uint8ClampedArray(W * H * 4);
   for (let p = 3; p < out.length; p += 4) out[p] = 255;
-  const norm = 1 / Math.asinh(SIM.white / SIM.soft);
+  const shift = Math.log10(SIM.soft / stretchSoft(comps));        // 0 whenever the zodiacal light is on
+  const acc = new Float32Array(W * H);                            // sum over the bands of the position on each band's colour bar
   for (let c = 0; c < ks.length; c++) {
     const k = ks[c], lam = BANDS[k].c, buf = upsample(dif[c], dw, dh, W, H, geom.wrapX);
     const psf = (BANDS[k].fwhm / 2.355) / 206265 / geom.pixRad;
@@ -356,15 +421,14 @@ async function renderGeom(geom, bandId, { signal, mjd } = {}) {
       splat(buf, W, H, fx, fy, sx, sy, amp, geom.wrapX);
       if (amp > 2) splat(buf, W, H, fx, fy, Math.min(sx * 5, 60), Math.min(sy * 5, 30), 0.04 * F * 1e-6 / (geom.om * TWO_PI * sx * 5 * sy * 5), geom.wrapX);
     }
-    const g = gains[c];
+    const lo = PAPER_RANGE[k][0] - shift, span = PAPER_RANGE[k][1] + SIM.headroom - shift - lo;
     for (let p = 0; p < W * H; p++) {
-      const val = Math.max(0, buf[p]) * g;
-      const b8 = 255 * Math.asinh(val / SIM.soft) * norm;
-      const q = p * 4;
-      if (composite) out[q + c] = b8; else out[q] = out[q + 1] = out[q + 2] = b8;
+      const t = (Math.log10(Math.max(buf[p], 1e-12)) - lo) / span;
+      acc[p] += t < 0 ? 0 : t > 1 ? 1 : t;
     }
     await tick(); aborted(signal);
   }
+  for (let p = 0; p < W * H; p++) magma(acc[p] / ks.length, out, p * 4);
   return { W, H, data: out };
 }
 
@@ -375,7 +439,7 @@ export async function renderFromParams(params, opts = {}) {
   const band = String(p.get("hips") || "color").replace(/\/+$/, "").split("/").pop();
   const proj = (p.get("projection") || "TAN").toUpperCase();
   const geom = proj === "CAR" ? carGeom(W, H) : tanGeom(parseFloat(p.get("ra")), parseFloat(p.get("dec")), parseFloat(p.get("fov")), W, H);
-  return renderGeom(geom, band, opts);
+  return renderGeom(geom, band, { comps: parseComps(p.get("comp")), points: p.get("pts") !== "0", ...opts });
 }
 
 /** ImageBitmap, ready for renderer.setBase / setPatch. */

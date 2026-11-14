@@ -13,7 +13,7 @@ export class View {
 
   resize(W, H) { this.W = W; this.H = H; }
   get maxFov() { return (this.proj === 1 ? 120 : 150) * D2R; }
-  get minFov() { return 0.5 * D2R; }
+  get minFov() { return 0.1 * D2R; }     // stars are drawn as points, so they stay sharp however far you zoom
 
   clamp() {
     this.alt = Math.max(-90 * D2R, Math.min(90 * D2R, this.alt));

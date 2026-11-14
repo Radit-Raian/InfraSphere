@@ -52,7 +52,7 @@ export class LabelLayer {
     return this._order;
   }
 
-  /** opts: { groups, showLabels, hideBelow, maxDrawn, selected } */
+  /** opts: { groups, showLabels, hideBelow, maxDrawn, selected, starDots } */
   draw(ctx, view, latDeg, lst, opts) {
     this.screen.length = 0;
     ctx.font = FONT;
@@ -70,6 +70,14 @@ export class LabelLayer {
       this.screen.push({ o, x: p[0], y: p[1] });
 
       const color = GROUP_COLORS[o.group] || GROUP_COLORS.other;
+      if (o.group === "star" && opts.starDots) {
+        // A real star from SIMBAD at its true position, so its name never floats over empty sky.
+        const V = o.V === null || o.V === undefined ? 11.5 : o.V;
+        ctx.fillStyle = "rgba(255,250,244,0.95)";
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], Math.max(0.9, Math.min(3.5, 3.4 - 0.25 * V)), 0, 2 * Math.PI);
+        ctx.fill();
+      }
       if (o.group !== "star") {
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.2;

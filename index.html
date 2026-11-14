@@ -49,6 +49,17 @@
   </section>
 
   <section>
+    <h2>Background light</h2>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="bg-zl" checked> Zodiacal light</label>
+      <label class="check"><input type="checkbox" id="bg-dgl" checked> Diffuse Galactic</label>
+      <label class="check"><input type="checkbox" id="bg-ebl" checked> Extragalactic</label>
+      <label class="check"><input type="checkbox" id="bg-stars" checked> Stars and sources</label>
+    </div>
+    <p class="note" style="margin:6px 0 0">Simulated sky only. Modelled after Crill et al. 2025 (SPHEREx Sky Simulator).</p>
+  </section>
+
+  <section>
     <h2>Labels</h2>
     <div class="row">
       <label class="check"><input type="checkbox" id="lbl-star"> Stars</label>
@@ -62,7 +73,6 @@
   <section>
     <h2>Solar system</h2>
     <div class="row">
-      <label class="check"><input type="checkbox" id="planets" checked> Sun, Moon, planets</label>
       <label class="check"><input type="checkbox" id="asteroids"> Asteroids</label>
       <label class="check"><input type="checkbox" id="neo"> Near-Earth asteroids</label>
     </div>
@@ -114,7 +124,7 @@
     </div>
     <div class="row" style="display:block">
       <label for="expo">Brightness</label>
-      <input type="range" id="expo" min="0.3" max="4" step="0.05" value="1.4">
+      <input type="range" id="expo" min="0.3" max="4" step="0.05" value="1.0">
       <label for="gam">Contrast</label>
       <input type="range" id="gam" min="0.5" max="2.5" step="0.05" value="1.0">
     </div>

@@ -5,6 +5,7 @@
 // ident (all names of an object).
 
 import { CONFIG } from "./config.js";
+import { svcFetch } from "./net.js";
 
 // ---------- helpers that need no network ----------
 
@@ -161,8 +162,8 @@ export async function runAdql(query, { signal } = {}) {
   const params = new URLSearchParams({ request: "doQuery", lang: "adql", format: "json", phase: "run", query });
   const useGet = query.length < 1500;
   const res = useGet
-    ? await fetch(CONFIG.simbadTap + "?" + params.toString(), { signal })
-    : await fetch(CONFIG.simbadTap, {
+    ? await svcFetch("simbad", CONFIG.simbadTap + "?" + params.toString(), { signal })
+    : await svcFetch("simbad", CONFIG.simbadTap, {
         method: "POST", signal,
         headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params.toString()
       });

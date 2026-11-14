@@ -18,7 +18,9 @@ Built for the NASA Space Apps Challenge. Plain HTML, CSS and JavaScript modules.
 - **Equatorial and galactic grids** (View panel), drawn on the sky next to the alt-az grid.
 - **InfraSphere tile grid**: the HEALPix tiles the SPHEREx maps are built from, fine enough to pick a 0.46 degree tile when zoomed in. Tap a tile, then **Inspect SPHEREx epochs**.
 - **Epoch inspector** (blink comparator): a workspace for one tile. Left: the batch of neighbouring tiles. Centre: pick epoch A and B, then **Blink** between them, show the **Difference**, compare the six **Bands**, or plot a **Light curve**. Right: case notes (flag and text), tile metadata, and every exposure that covered the tile with its date and time (UTC), grouped by survey pass. Keys: Space, 1/2, F, C, arrows, Esc.
-- **Sun, Moon, planets and asteroids** for the chosen date. Asteroids come from JPL orbits (400 brighter ones, plus an optional near-Earth set).
+- **Asteroids** for the chosen date, from JPL orbits (400 brighter ones, plus an optional near-Earth set). The Sun, Moon and planets are not drawn: a flat coloured dot is not what they look like. Their positions are still computed (`majorBodies` in `js/solar-system.js`).
+- **Stellarium-style zoom (simulated sky)**: stars are drawn live as sharp points, not painted into the picture, so they never blur. The faintest star shown depends on the field of view: zoom in and fainter stars appear, and the stars already there stay put and grow slightly. The field of view goes down to 0.1 degrees. The picture itself carries only the smooth diffuse light. It is coloured like the paper's Fig. 2: matplotlib's magma (black, purple, orange, pale yellow) on log10(MJy/sr), each band using the paper's colour-bar range plus 0.5 dex of headroom for the brighter ecliptic and Milky Way; the colour composite is the average of the six bands' colours. Brightness (default 1.0) and Contrast shift that scale. With `?real=1` the real SPHEREx maps are used, their stars are part of the picture, and they do blur when stretched.
+- **Simulated sky background** (the default; add `?real=1` for the real data): zodiacal light, diffuse Galactic light and extragalactic light, built the way Section 4 of the SPHEREx Sky Simulator paper (Crill et al. 2025, ApJS 281, 10) describes. Each can be switched on and off under **Background light**. See "Sky background model" below.
 
 ## Run it
 
@@ -56,7 +58,10 @@ GitHub Pages cannot run `serve.py`. If IRSA or JPL block direct requests from yo
 | `js/astro.js` | Sidereal time and sky-coordinate maths. No DOM, fully tested. |
 | `js/view.js` | The camera: where you look, zoom, and the two projections. |
 | `js/sky-renderer.js` | WebGL2 shader that paints the SPHEREx sky for your place and time. |
-| `js/sky-data.js` | Loads SPHEREx maps and zoom-in patches from CDS. |
+| `js/sky-data.js` | Loads SPHEREx maps and zoom-in patches from CDS, or asks `sim-sky.js` for a simulated sky. |
+| `js/sky-background.js` | Zodiacal light (Kelsall model), diffuse Galactic light and extragalactic light, after the paper's Section 4. No DOM, tested. |
+| `js/sim-sky.js` | Simulated SPHEREx sky: instrument tables, stars, extended sources, and the sum of all components, drawn to an image. |
+| `js/sim-irsa.js` | Simulated IRSA exposure list and detector cutouts for the epoch inspector, using the same background model. |
 | `js/simbad.js` | SIMBAD client: ADQL queries, name tidying, object types. |
 | `js/label-feed.js` | Decides which part of the sky to ask SIMBAD about, and how faint to go. |
 | `js/labels.js` | Draws labels without overlaps, rings deep-sky objects, picks clicked objects. |
@@ -67,11 +72,24 @@ GitHub Pages cannot run `serve.py`. If IRSA or JPL block direct requests from yo
 | `js/fits.js` | Streaming FITS reader, sky coordinates, and the re-alignment onto a common north-up grid. |
 | `js/irsa.js` | IRSA TAP query for SPHEREx exposures, cutout download, epoch grouping. |
 | `js/inspector.js` | The epoch inspector window. |
-| `js/solar-system.js` | Sun, Moon, planets (Astronomy Engine) and asteroids (JPL orbits). |
+| `js/solar-system.js` | Asteroids (JPL orbits) drawn as markers; Sun, Moon and planet positions (Astronomy Engine) without drawing them. |
+| `js/star-layer.js` | Live stars for the simulated sky: sharp points from the star generator, with a faintest-star limit that deepens as you zoom. No DOM, tested. |
 | `js/net.js` | `fetch` with a same-origin proxy fallback. |
 | `js/vendor/astronomy.js` | Astronomy Engine by Don Cross, MIT licence, bundled so no CDN is needed. |
 | `serve.py` | Static server plus the IRSA and JPL forwarding paths. |
 | `test/run.js` | Unit tests (`npm test`). |
+
+## Sky background model
+
+The simulated sky adds three diffuse components to the stars and extended sources. Code: `js/sky-background.js`. Brightness is in MJy/sr. `npm test` checks the numbers below against the paper.
+
+| Component | What the paper does (Sec. 4) | What this app does | Where it differs |
+| --- | --- | --- | --- |
+| **Zodiacal light** (4.1) | Modified Kelsall et al. 1998 model: dust cloud, three dust bands, solar ring and Earth-trailing blob, integrated along the line of sight from Earth's position at the date; sunlight scattered with the solar spectrum plus thermal emission. | The same integral to 5.2 AU with Kelsall's Table 1 geometry and Table 2 albedo, phase function and emissivity, evaluated at Earth's real position for the exposure date. The all-sky map uses the survey geometry (Sun 90 degrees away). | The Sun is a 5772 K blackbody scaled as in Kelsall, not the ASTM E-490 spectrum. The paper's extra changes below 1.25 um (Hong 1985 phase function, interpolation from 0.55 um) and its small albedo and emissivity adjustments are not published as numbers, so they are not applied. |
+| **Diffuse Galactic light** (4.2) | Far-infrared dust brightness from Planck maps, times a fixed conversion spectrum nu b_nu (Sano et al. 2016, the red curve in Fig. 6), which has a 3.3 um PAH feature. No structure below about 5 arcmin. | Far-infrared brightness times the same nu b_nu, converted to MJy/sr, averaged over each band's 17 spectral channels. | nu b_nu is read off the printed curve (about 10 per cent). The Planck dust map is not shipped, so a procedural dust template stands in, scaled to about 1 MJy/sr at high Galactic latitude, the value the paper quotes. |
+| **Extragalactic light** (4.4) | Halo-model maps (Mirocha et al., in preparation) at 1-3 arcsec, one per spectral channel. | A faint, nearly flat, log-normal clumpy floor at the level Fig. 7 shows (about 2e-3 MJy/sr, inside its colour range). | The halo model is not public, so there is no wavelength dependence and no real galaxy clustering. |
+
+What the model reproduces from the paper: the zodiacal spectrum of Fig. 6 (minimum near 3 um, about ten times brighter at 5 um), the factor of about three between the ecliptic and the poles, and the vertical gradients along each detector in the epoch inspector.
 
 ## How the labeling works
 
@@ -91,7 +109,7 @@ GitHub Pages cannot run `serve.py`. If IRSA or JPL block direct requests from yo
 
 ## Why there are no planets in the SPHEREx sky
 
-SPHEREx does observe moving solar-system objects, but they are not fixed features. The all-sky HiPS maps are built from exposures taken over many months, and a planet or asteroid is in a different place at every date, so it does not stay as a feature in the combined map. They show up in individual exposures at the position they had that day. This app therefore draws planets and asteroids from orbits for the date you choose, as markers on top of the map. It does not claim they are in the map.
+SPHEREx does observe moving solar-system objects, but they are not fixed features. The all-sky HiPS maps are built from exposures taken over many months, and a planet or asteroid is in a different place at every date, so it does not stay as a feature in the combined map. They show up in individual exposures at the position they had that day. This app therefore draws asteroids from orbits for the date you choose, as markers on top of the map, and does not claim they are in the map. It does not draw the Sun, Moon or planets at all.
 
 ## Things to check on your first run
 
@@ -110,10 +128,10 @@ I could test the maths, camera and query-building in Node (`npm test`), but I co
 - Each SPHEREx exposure samples a different wavelength inside its band (the filter changes across the detector), and its central wavelength at your tile is not read here. Compare dates within one band, and treat differences with care.
 - Exposures are not zodiacal-light subtracted. The median option removes the smooth background, not structure.
 - Cutouts are aligned using the linear (TAN) part of each image's coordinates; the small SIP distortion terms are ignored, which is about a pixel at most.
-- Asteroid positions use two-body orbits and are approximate; planets use Astronomy Engine and are accurate to well under an arcminute.
+- Asteroid positions use two-body orbits and are approximate. Planet positions (Astronomy Engine, accurate to well under an arcminute) are computed but not drawn.
+- In the simulated sky the stars are generated, not a real catalogue (see "Sky background model"); only the SIMBAD stars, which get a dot at their true position, are real.
 - Positions use J2000 coordinates with the observer's sidereal time of date, so everything on screen is consistent but could be about a third of a degree off the true altitude and azimuth because precession is not applied.
-- The SPHEREx map is a fixed picture from when it was observed. Only the observer's sky rotation is live. Planets, the Moon and asteroids are not drawn yet.
-- Band wavelengths in the panel are approximate. Check the IRSA user guide before quoting exact values.
+- The SPHEREx map is a fixed picture from when it was observed. Only the observer's sky rotation is live.- Band wavelengths in the panel are approximate. Check the IRSA user guide before quoting exact values.
 - Clicking returns the nearest SIMBAD object, which can be a faint background object near a bright star. Zoom in for precision.
 - Stars use J2000 positions with no proper-motion correction, which is far below a pixel for almost all stars.
 
