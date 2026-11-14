@@ -328,7 +328,6 @@ test("IRSA: reprocessed duplicates are dropped and exposures are grouped into su
   assert.equal(noNames.length, 2);
 });
 
-console.log(`\n${passed} tests passed`);
 
 test("IRSA: cutout address works for both relative and absolute exposure paths", async () => {
   const { cutoutUrl } = await import("../js/irsa.js");
@@ -336,3 +335,36 @@ test("IRSA: cutout address works for both relative and absolute exposure paths",
   assert.equal(cutoutUrl("/api/x/a.fits", 10, -5, 0.3), want);
   assert.equal(cutoutUrl("https://irsa.ipac.caltech.edu/api/x/a.fits", 10, -5, 0.3), want);
 });
+// ---- simulated sky (no network) ----
+import * as SIMSKY from "../js/sim-sky.js";
+import * as SIMIRSA from "../js/sim-irsa.js";
+{
+  const p = () => new URLSearchParams({ hips: "x/D2", width: "64", height: "32", fov: "360", projection: "CAR", ra: "0", dec: "0" });
+  const a = await SIMSKY.renderFromParams(p()), b = await SIMSKY.renderFromParams(p());
+  test("simulated all-sky map is deterministic and RGBA-sized", () => {
+    assert.equal(a.data.length, 64 * 32 * 4);
+    assert.deepEqual(Array.from(a.data), Array.from(b.data));
+  });
+  const gal = await SIMSKY.renderFromParams(new URLSearchParams({ hips: "x/D1", width: "64", height: "32", fov: "360", projection: "CAR" }));
+  test("the Galactic plane is brighter than the poles in the simulated map", () => {
+    const at = (ra, dec) => { const i = Math.round((0.5 - ra / 360) * 64), j = Math.round((0.5 - dec / 180) * 32); return gal.data[(j * 64 + i) * 4]; };
+    assert.ok(at(266.4, -29) > at(192.9, 27.1) + 20, "galactic centre vs north galactic pole");
+  });
+  const rows = SIMIRSA.simulatedRows({ ra: 83.82, dec: -5.39, bands: ["D2"] }, 61358);
+  test("simulated exposure list parses like IRSA's and is grouped by survey", () => {
+    const ex = IR.cleanExposures(rows.map(IR.parseExposure).filter(Boolean));
+    assert.ok(ex.length > 30 && ex.every((e) => e.band === "D2" && e.survey >= 1));
+    const g = IR.groupEpochs(ex);
+    assert.ok(g.length >= 2 && g[0].mjdMax < g[1].mjdMin);
+  });
+  const e0 = { uri: rows[0].uri, mjd: Number(rows[0].mjd) };
+  const cut = await SIMIRSA.simulatedCutout(e0, 83.82, -5.39, 0.3);
+  test("simulated cutout carries a working WCS and finite pixels near the centre", () => {
+    const { img, wcs } = cut;
+    const [x, y] = wcs.skyToPix(83.82, -5.39);
+    near(x, (img.nx + 1) / 2, 1e-6); near(y, (img.ny + 1) / 2, 1e-6);
+    assert.ok(img.data.every(Number.isFinite));
+  });
+}
+
+console.log(`\n${passed} tests passed`);

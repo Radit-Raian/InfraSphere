@@ -5,6 +5,7 @@
 
 import { CONFIG } from "./config.js";
 import { angSepDeg } from "./astro.js";
+import { renderSimImage } from "./sim-sky.js";
 
 export class SkyData {
   constructor(renderer, ui) {
@@ -21,6 +22,7 @@ export class SkyData {
   }
 
   async _fetchImage(params, signal) {
+    if (CONFIG.simulate) return renderSimImage(params, signal);
     const res = await fetch(CONFIG.hips2fits + "?" + params.toString(), { signal, mode: "cors" });
     if (!res.ok) throw new Error("server answered " + res.status);
     return createImageBitmap(await res.blob());
@@ -41,7 +43,7 @@ export class SkyData {
         const width = sizes[i], key = id + ":" + width;
         let bmp = this.cache.get(key);
         if (!bmp) {
-          this.ui.setBusy("sky", "Loading " + this._label(id) + " sky (" + width + " px)" + (i > 0 ? ", sharpening" : ""));
+          this.ui.setBusy("sky", (CONFIG.simulate ? "Building simulated " : "Loading ") + this._label(id) + " sky (" + width + " px)" + (i > 0 ? ", sharpening" : ""));
           bmp = await this._fetchImage(new URLSearchParams({
             hips: CONFIG.hipsRoot + id, width: String(width), height: String(width / 2),
             fov: "360", projection: "CAR", coordsys: "icrs", ra: "0", dec: "0", format: "jpg"

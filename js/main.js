@@ -192,6 +192,10 @@ $("search").addEventListener("keydown", (e) => { if (e.key === "Enter") searchOb
 $("searchBtn").addEventListener("click", () => searchObject($("search").value));
 $("toggle").addEventListener("click", () => $("panel").classList.toggle("hidden"));
 if (window.innerWidth < 700) $("panel").classList.add("hidden");
+if (CONFIG.simulate) {
+  $("credits").textContent = "SIMULATED sky: a procedural model after the SPHEREx Sky Simulator (Crill et al. 2025, ApJS 281, 10), not real survey data. Add ?real=1 to the address for NASA/JPL-Caltech data. Object data: SIMBAD, CDS.";
+  document.title = "InfraSphere (simulated sky)";
+}
 
 $("file").addEventListener("change", async (e) => {
   const f = e.target.files[0];

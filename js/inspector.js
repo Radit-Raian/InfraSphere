@@ -6,6 +6,7 @@
 
 import { CONFIG } from "./config.js";
 import * as Irsa from "./irsa.js";
+import { renderSimImage, renderSimThumb } from "./sim-sky.js";
 import { makeGrid, reproject, gridToSky, median, quantile } from "./fits.js";
 import { ang2pix, pix2ang, tileSizeDeg, tileName } from "./healpix.js";
 
@@ -208,10 +209,11 @@ export class Inspector {
     for (const b of this.batch) {
       const f = el("figure", "ix-tile");
       const img = el("img"); img.alt = b.name; img.loading = "lazy";
-      img.src = CONFIG.hips2fits + "?" + new URLSearchParams({
+      const tp = new URLSearchParams({
         hips: CONFIG.hipsRoot + this._bandId(), width: "112", height: "112", fov: String(tileSizeDeg(ORDER)),
         projection: "TAN", coordsys: "icrs", ra: b.ra.toFixed(5), dec: b.dec.toFixed(5), format: "jpg"
-      }).toString();
+      });
+      if (CONFIG.simulate) renderSimThumb(tp).then((u) => { img.src = u; }); else img.src = CONFIG.hips2fits + "?" + tp.toString();
       const cap = el("figcaption", null, b.name);
       f.append(img, cap);
       f.addEventListener("click", () => this.open({ ra: b.ra, dec: b.dec, title: "Tile " + b.name }, { keepBatch: true }));
@@ -295,7 +297,7 @@ export class Inspector {
     this.epochsEl.innerHTML = ""; this._fillSelects(); this._meta();
     this.grid = makeGrid(ra, dec, size, CONFIG.inspector.pixelScaleArcsec / 3600);
     this.off.width = this.off.height = this.grid.n;
-    this.say("Asking IRSA which SPHEREx exposures cover this spot… (this can take 10 to 20 seconds)");
+    this.say(CONFIG.simulate ? "Simulating the SPHEREx exposures that cover this spot…" : "Asking IRSA which SPHEREx exposures cover this spot… (this can take 10 to 20 seconds)");
     this.loadBtn.disabled = true; this.loadBtn.textContent = "Loading…";
     this._drawStage();
 
@@ -355,17 +357,20 @@ export class Inspector {
   async _loadMosaic(band, ctl) {
     const id = band === "all" ? "color" : band;
     const n = 512;
-    const url = CONFIG.hips2fits + "?" + new URLSearchParams({
+    const mp = new URLSearchParams({
       hips: CONFIG.hipsRoot + id, width: String(n), height: String(n), fov: String(this.grid.size),
       projection: "TAN", coordsys: "icrs", ra: this.pos.ra.toFixed(6), dec: this.pos.dec.toFixed(6), format: "jpg"
-    }).toString();
-    const ent = { id: "mosaic", title: "Mosaic (all epochs)", sub: "combined map from CDS", kind: "img", state: "loading" };
+    });
+    const ent = { id: "mosaic", title: "Mosaic (all epochs)", sub: CONFIG.simulate ? "simulated combined map" : "combined map from CDS", kind: "img", state: "loading" };
     this.entries.set("mosaic", ent);
     this._fillSelects();
     try {
-      const res = await fetch(url, { signal: ctl.signal });
-      if (!res.ok) throw new Error("server answered " + res.status);
-      ent.bitmap = await createImageBitmap(await res.blob());
+      if (CONFIG.simulate) ent.bitmap = await renderSimImage(mp, ctl.signal);
+      else {
+        const res = await fetch(CONFIG.hips2fits + "?" + mp.toString(), { signal: ctl.signal });
+        if (!res.ok) throw new Error("server answered " + res.status);
+        ent.bitmap = await createImageBitmap(await res.blob());
+      }
       ent.state = "ok";
     } catch (e) { if (e.name === "AbortError") return; ent.state = "failed"; ent.error = e.message; }
     if (ctl.signal.aborted) return;

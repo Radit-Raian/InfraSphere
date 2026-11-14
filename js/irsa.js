@@ -6,6 +6,7 @@
 import { CONFIG } from "./config.js";
 import { svcFetch } from "./net.js";
 import { readFitsImage, makeWcs } from "./fits.js";
+import { simulatedRows, simulatedCutout } from "./sim-irsa.js";
 
 /** MJD -> JavaScript Date (UTC). */
 export const mjdToDate = (mjd) => new Date((mjd - 40587) * 86400000);
@@ -88,6 +89,7 @@ export function groupEpochs(list, gapDays = 45) {
 }
 
 export async function findExposures({ ra, dec, bands }, { signal } = {}) {
+  if (CONFIG.simulate) return cleanExposures(simulatedRows({ ra, dec, bands }).map(parseExposure).filter(Boolean));
   const q = exposureQuery({ ra, dec, bands });
   const url = CONFIG.irsaBase + "/TAP/sync?" + new URLSearchParams({ REQUEST: "doQuery", LANG: "ADQL", FORMAT: "csv", QUERY: q }).toString();
   const res = await svcFetch("irsa", url, { signal });
@@ -113,6 +115,7 @@ export const cutoutUrl = (uri, ra, dec, size) => {
 
 /** Download one cutout, read only its image, and return { img, wcs }. Retries once. */
 export async function fetchCutout(exposure, ra, dec, size, { signal } = {}) {
+  if (CONFIG.simulate) return simulatedCutout(exposure, ra, dec, size, { signal });
   let last;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {

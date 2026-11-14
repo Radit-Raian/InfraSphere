@@ -1,5 +1,10 @@
 // All tunable settings and service addresses live here.
 export const CONFIG = {
+  // true: the sky maps, tile thumbnails and epoch-inspector exposures are generated in the browser from a model of the
+  // SPHEREx Sky Simulator (js/sim-sky.js, js/sim-irsa.js). Nothing is downloaded for them, so they appear at once.
+  // false (or open the page with ?real=1): fetch the real SPHEREx data from CDS and IRSA as before.
+  simulate: !(typeof location !== "undefined" && new URLSearchParams(location.search).has("real")),
+
   // SPHEREx QR2 sky maps as HiPS tiles (CDS), flattened on demand by hips2fits.
   hipsRoot: "https://alasky.cds.unistra.fr/SPHEREx/",
   hips2fits: "https://alasky.cds.unistra.fr/hips-image-services/hips2fits",
