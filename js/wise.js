@@ -15,6 +15,18 @@ export function wiseUrl(ra, dec, { size, zoom, base } = {}) {
   return (base || w.base) + "#" + parts.join("&");
 }
 
+// Used when config.js has no wise.blink section (for example an older config.js is deployed).
+const BLINK_DEFAULT = {
+  cutout: "https://www.legacysurvey.org/viewer/cutout.jpg", px: 256, ms: 700,
+  epochs: [
+    { layer: "unwise-w1w2", label: "2010-11 (AllWISE)" },
+    { layer: "unwise-neo1", label: "2014 (NEOWISE 1)" }, { layer: "unwise-neo2", label: "2015 (NEOWISE 2)" },
+    { layer: "unwise-neo3", label: "2016 (NEOWISE 3)" }, { layer: "unwise-neo4", label: "2017 (NEOWISE 4)" },
+    { layer: "unwise-neo5", label: "2018 (NEOWISE 5)" }, { layer: "unwise-neo6", label: "2019 (NEOWISE 6)" },
+    { layer: "unwise-neo7", label: "2020 (NEOWISE 7)" }
+  ]
+};
+
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
 // Optional quick calibration of the crop from the address bar: ?wisecrop=x,y,w,h
@@ -87,7 +99,13 @@ export class WisePanel {
 
   /** Show the WISE epochs for a target: { ra, dec (deg), name?, group? }. A new frame is made every time,
    *  because WiseView only reads its address when the page loads. */
-  open({ ra, dec, name, group }) {
+  /** Never throws: a problem here must not stop the SIMBAD lookup that called it. */
+  open(target) {
+    try { this._open(target); }
+    catch (e) { console.error("WISE panel failed", e); try { this.root.classList.add("hidden"); } catch (_) { /* nothing */ } }
+  }
+
+  _open({ ra, dec, name, group }) {
     if (!CONFIG.wise.enabled || !Number.isFinite(ra) || !Number.isFinite(dec)) return;
     const deep = group === "galaxy" || group === "nebula" || group === "cluster";
     const w = CONFIG.wise, secure = location.protocol === "https:";
@@ -115,7 +133,7 @@ export class WisePanel {
   /** WiseView itself cannot be framed on an https page, so blink the unWISE epoch coadds (AllWISE, then one per NEOWISE year)
    *  from the Legacy Surveys cutout service, which is https and works in plain <img> tags. */
   _openBlink(ra, dec, deep, name, tabUrl) {
-    const w = CONFIG.wise, B = w.blink;
+    const w = CONFIG.wise, B = { ...BLINK_DEFAULT, ...(w.blink || {}) };
     const arcsec = deep ? w.deepSkySize : w.size, N = B.px;
     const frames = B.epochs.map((e) => ({
       ...e,
