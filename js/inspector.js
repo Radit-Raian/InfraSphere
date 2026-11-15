@@ -9,6 +9,8 @@ import * as Irsa from "./irsa.js";
 import { renderSimImage, renderSimThumb } from "./sim-sky.js";
 import { makeGrid, reproject, gridToSky, median, quantile } from "./fits.js";
 import { ang2pix, pix2ang, tileSizeDeg, tileName } from "./healpix.js";
+import { BANDS, bandIndex } from "./sim-sky.js";
+import { fetchPhotometry, drawSed, describe, toCsv, posParam } from "./photometry.js";
 
 const ORDER = 7;
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -90,7 +92,7 @@ export class Inspector {
     bS.addEventListener("change", () => this._setFromSelect("B", bS.value));
     this.modeBtns = {};
     const modes = el("div", "ix-modes");
-    for (const [id, label] of [["blink", "BLINK COMPARATOR"], ["diff", "DIFFERENCE"], ["bands", "BANDS"], ["curve", "LIGHT CURVE"]]) {
+    for (const [id, label] of [["blink", "BLINK COMPARATOR"], ["diff", "DIFFERENCE"], ["bands", "BANDS"], ["curve", "LIGHT CURVE"], ["spectrum", "SPHEREx SPECTRUM"], ["sed", "CATALOGUE SED"]]) {
       const b = el("button", "ix-mode", label); b.addEventListener("click", () => this.setMode(id));
       this.modeBtns[id] = b; modes.append(b);
     }
@@ -152,6 +154,21 @@ export class Inspector {
     right.append(el("h3", "ix-h", "TILE METADATA"));
     this.metaEl = el("table", "ix-meta");
     right.append(this.metaEl);
+    right.append(el("h3", "ix-h", "SPECTRUM & PHOTOMETRY"));
+    const ph = el("div", "ix-phot");
+    const rl = el("label", null, "Radius"); rl.htmlFor = "ix-prad";
+    this.photRad = el("select"); this.photRad.id = "ix-prad";
+    for (const r of [2, 5, 10, 30]) { const o = el("option", null, r + "″"); o.value = r; if (r === 5) o.selected = true; this.photRad.append(o); }
+    this.photRad.addEventListener("change", () => this._loadPhot());
+    this.photCsv = el("a", "btn", "CSV"); this.photCsv.title = "Download the points (loads in SPLAT-VO, SpecPro, TOPCAT ...)";
+    this.photSpx = el("a", "btn primary", "SPHEREx spectrum (IRSA)"); this.photSpx.target = "_blank"; this.photSpx.rel = "noopener";
+    this.photSpx.href = CONFIG.spherexSpectroTool;
+    this.photSpx.title = "Opens IRSA's SPHEREx spectrophotometry tool; this spot's position is copied to your clipboard";
+    this.photSpx.addEventListener("click", () => { if (this.pos && navigator.clipboard) navigator.clipboard.writeText(`${this.pos.ra.toFixed(6)}, ${this.pos.dec.toFixed(6)}`).then(() => this.say("Position copied. Paste it into the IRSA tool."), () => {}); });
+    this.photViz = el("a", "btn", "VizieR SED"); this.photViz.target = "_blank"; this.photViz.rel = "noopener";
+    ph.append(rl, this.photRad, this.photCsv, this.photSpx, this.photViz);
+    this.photNote = el("p", "note ix-photnote", "");
+    right.append(ph, this.photNote);
     this.epochHead = el("h3", "ix-h", "ALL EPOCHS");
     this.epochsEl = el("div", "ix-epochs");
     this.noteEl = el("p", "note",
@@ -178,6 +195,7 @@ export class Inspector {
     this.noteTa.value = n.text || ""; this._markFlag(!!n.flag);
     this._restartBlink();
     this.load();
+    this._loadPhot();
   }
 
   close() {
@@ -583,7 +601,7 @@ export class Inspector {
     ctx.fillStyle = "#120b0f"; ctx.fillRect(0, 0, W, W);
     this.stageArr = null;
     this.bandsBtn.classList.add("hidden");
-    this.ringEl.style.display = this.mode === "curve" || this.mode === "bands" ? "none" : "";
+    this.ringEl.style.display = this.mode === "curve" || this.mode === "bands" || this.mode === "spectrum" || this.mode === "sed" ? "none" : "";
     const blank = (msg) => { ctx.fillStyle = "#a8939b"; ctx.font = "15px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.fillText(msg, W / 2, W / 2); ctx.textAlign = "left"; };
 
     if (this.mode === "blink") {
@@ -604,7 +622,117 @@ export class Inspector {
       ctx.drawImage(this._raster(null, d, "div"), 0, 0, W, W);
       this._label(["A − B", `${this.A.title}  minus  ${this.B.title}`, "blue = fainter in A · red = brighter in A"], "d");
     } else if (this.mode === "bands") this._drawBands(ctx, W, blank);
+    else if (this.mode === "spectrum") this._drawSpectrum(ctx, W, blank);
+    else if (this.mode === "sed") this._drawSed(ctx, W);
     else this._drawCurve(ctx, W, blank);
+  }
+
+  // ---------- catalogue photometry (the SPECTRUM view) ----------
+
+  async _loadPhot() {
+    if (!this.pos) return;
+    if (this.photCtl) this.photCtl.abort();
+    const ctl = this.photCtl = new AbortController();
+    const { ra, dec } = this.pos, radius = Number(this.photRad.value);
+    this.phot = { pts: [], busy: true, errors: [], screen: [] };
+    this.photViz.href = `${CONFIG.vizierPage}?-c=${encodeURIComponent(posParam(ra, dec))}&-c.rs=${radius}`;
+    this.photNote.textContent = "Asking VizieR for 2MASS, AllWISE and Gaia photometry…";
+    if (this.mode === "sed") this._drawStage();
+    try {
+      const r = await fetchPhotometry(ra, dec, radius, { signal: ctl.signal });
+      if (ctl !== this.photCtl) return;
+      this.phot = { pts: r.pts, busy: false, errors: r.errors, screen: [] };
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      this.phot = { pts: [], busy: false, errors: [e.message], screen: [] };
+    }
+    const n = this.phot.pts.length, bad = this.phot.errors.length;
+    this.photNote.textContent = n
+      ? `${n} points within ${radius}″ (nearest source in each catalogue).` + (bad ? ` ${bad} catalogue(s) failed: ${this.phot.errors[0]}` : "")
+      : bad ? "Photometry unavailable: " + this.phot.errors[0] : `No 2MASS, AllWISE or Gaia source within ${radius}″.`;
+    if (this.photCsv.dataset.url) URL.revokeObjectURL(this.photCsv.dataset.url);
+    const url = URL.createObjectURL(new Blob([toCsv(this.phot.pts)], { type: "text/csv" }));
+    this.photCsv.dataset.url = url; this.photCsv.href = url; this.photCsv.download = `photometry_${posParam(ra, dec)}.csv`;
+    if (this.mode === "sed") this._drawStage();
+  }
+
+  _drawSed(ctx, W) {
+    const P = this.phot || { pts: [], busy: true, errors: [] };
+    this._label(["CATALOGUE SED", "photometry at the ring", "2MASS · AllWISE · Gaia DR3, nearest source"], "d");
+    const msg = P.busy ? "Loading photometry…" : P.errors.length && !P.pts.length ? "Photometry unavailable. See the note on the right." : null;
+    P.screen = drawSed(ctx, W, P.pts, msg);
+  }
+
+  _hoverSed(ev) {
+    const P = this.phot; if (!P || !P.screen) return;
+    const r = this.stage.getBoundingClientRect(), k = STAGE / r.width, x = (ev.clientX - r.left) * k, y = (ev.clientY - r.top) * k;
+    let best = null, bd = 18 * 18;
+    for (const s of P.screen) { const d = (s.x - x) ** 2 + (s.y - y) ** 2; if (d < bd) { bd = d; best = s.p; } }
+    this._readout(best ? describe(best) : "Hover a point for its catalogue, wavelength and flux.");
+  }
+
+  // ---------- SPHEREx spectrum: the exposures of this tile, one point per exposure at its own wavelength ----------
+
+  _expLambda(e) {
+    const m = String(e.uri).match(/level2_(\d{4})W(\d{2})_(\d)B_(\d+)_0(D\d)_spx/);       // simulated file names carry the channel
+    if (!m) return null;
+    const B = BANDS[bandIndex(m[5])];
+    return B && B.ch ? B.ch[Number(m[4])] || null : null;
+  }
+
+  _drawSpectrum(ctx, W, blank) {
+    this._label(["SPHEREx SPECTRUM", "central 3×3 pixels, one point per exposure", "hover · click = A · shift-click = B"], "d");
+    const pts = [];
+    let any = 0;
+    for (const g of this.epochs) for (const e of g.items) {
+      const ent = this.entries.get(e.key);
+      if (!ent || ent.state !== "ok") continue;
+      any++;
+      const lam = this._expLambda(e), y = this._flux(ent);
+      if (lam && Number.isFinite(y)) pts.push({ ent, lam, y, color: g.color });
+    }
+    this.curvePts = [];
+    if (pts.length < 2) {
+      blank(!any ? "Load exposures first" : CONFIG.simulate ? "Need at least two loaded exposures" : "Real files: wavelength per exposure is not read yet");
+      if (any && !CONFIG.simulate) { ctx.fillText("Use “SPHEREx spectrum (IRSA)” on the right.", W / 2, W / 2 + 26); }
+      return;
+    }
+    const L = 70, R = 24, T = 64, B = 70, w = W - L - R, h = W - T - B;
+    let x0 = Math.min(...pts.map((p) => p.lam)) - 0.05, x1 = Math.max(...pts.map((p) => p.lam)) + 0.05;
+    let y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
+    const pad = (y1 - y0 || 1) * 0.1; y0 -= pad; y1 += pad;
+    const X = (v) => L + ((v - x0) / (x1 - x0)) * w, Y = (v) => T + h - ((v - y0) / (y1 - y0)) * h;
+    ctx.strokeStyle = "#3a2630"; ctx.fillStyle = "#a8939b"; ctx.font = "12px system-ui, sans-serif"; ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const yv = y0 + ((y1 - y0) * i) / 4, yy = Y(yv), xv = x0 + ((x1 - x0) * i) / 4, xx = X(xv);
+      ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(L + w, yy); ctx.stroke();
+      ctx.textAlign = "right"; ctx.fillText(yv.toPrecision(3), L - 6, yy + 4);
+      ctx.beginPath(); ctx.moveTo(xx, T); ctx.lineTo(xx, T + h); ctx.stroke();
+      ctx.textAlign = "center"; ctx.fillText(xv.toFixed(2), xx, T + h + 18);
+    }
+    ctx.fillText("wavelength (µm)", L + w / 2, T + h + 40);
+    ctx.save(); ctx.translate(16, T + h / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = "center";
+    ctx.fillText(this.subI.checked ? "flux above image median (MJy/sr)" : "flux (MJy/sr)", 0, 0); ctx.restore();
+    const sorted = [...pts].sort((a, b) => a.lam - b.lam);
+    ctx.strokeStyle = "rgba(200,190,200,0.25)"; ctx.beginPath();
+    sorted.forEach((p, i) => { const x = X(p.lam), y = Y(p.y); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.stroke();
+    for (const p of pts) {
+      const px = X(p.lam), py = Y(p.y);
+      this.curvePts.push({ px, py, ent: p.ent, lam: p.lam, y: p.y });
+      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(px, py, 4.5, 0, 7); ctx.fill();
+      for (const [sel, col] of [[this.A, "#f2557a"], [this.B, "#6fb7ff"]]) if (sel === p.ent) { ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(px, py, 9, 0, 7); ctx.stroke(); }
+    }
+    ctx.textAlign = "left"; ctx.fillStyle = "#a8939b";
+    ctx.fillText("Colours = survey passes. Point source at the ring: flux above background. Simulated exposures.", L, W - 14);
+  }
+
+  _hoverSpec(ev) {
+    if (!this.curvePts.length) return;
+    const r = this.stage.getBoundingClientRect(), k = STAGE / r.width, x = (ev.clientX - r.left) * k, y = (ev.clientY - r.top) * k;
+    let best = null, bd = 14 * 14;
+    for (const p of this.curvePts) { const d = (p.px - x) ** 2 + (p.py - y) ** 2; if (d < bd) { bd = d; best = p; } }
+    this._readout(best ? `${best.ent.title} · ${best.lam.toFixed(3)} µm · ${best.y.toPrecision(4)} MJy/sr` : "Hover a point for its exposure, wavelength and flux.");
   }
 
   _drawBands(ctx, W, blank) {
@@ -681,7 +809,7 @@ export class Inspector {
   }
 
   _stageClick(ev) {
-    if (this.mode !== "curve" || !this.curvePts.length) return;
+    if ((this.mode !== "curve" && this.mode !== "spectrum") || !this.curvePts.length) return;
     const r = this.stage.getBoundingClientRect(), k = STAGE / r.width;
     const x = (ev.clientX - r.left) * k, y = (ev.clientY - r.top) * k;
     let best = null, bd = 14 * 14;
@@ -692,6 +820,8 @@ export class Inspector {
   _readout(txt) { this.readEl.textContent = txt || "Hover the image for position and value."; }
 
   _hover(ev) {
+    if (this.mode === "sed") { this._hoverSed(ev); return; }
+    if (this.mode === "spectrum") { this._hoverSpec(ev); return; }
     if (!this.grid || this.mode === "bands" || this.mode === "curve") return;
     const r = this.stage.getBoundingClientRect(), n = this.grid.n;
     const i = Math.floor(((ev.clientX - r.left) / r.width) * n), j = Math.floor(((ev.clientY - r.top) / r.height) * n);

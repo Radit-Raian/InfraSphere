@@ -15,6 +15,11 @@ export const CONFIG = {
   simbadMirrors: ["https://simbad.cfa.harvard.edu/simbad/sim-tap/sync"],
   simbadPage: "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=",
 
+  // VizieR TAP (CDS): catalogue photometry (2MASS, AllWISE, Gaia) for the epoch inspector's spectrum view.
+  vizierTap: "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync",
+  vizierPage: "https://vizier.cds.unistra.fr/vizier/sed/",
+  spherexSpectroTool: "https://irsa.ipac.caltech.edu/applications/spherex/tool-spectrophotometry",
+
   irsaPage: "https://irsa.ipac.caltech.edu/Missions/spherex.html",
 
   // IRSA: TAP lists every SPHEREx exposure that covers a position; the cutout service returns a small
@@ -23,7 +28,7 @@ export const CONFIG = {
   sbdbApi: "https://ssd-api.jpl.nasa.gov/sbdb_query.api",
   // If the browser blocks a direct request (CORS), the app retries through these same-origin paths,
   // which serve.py forwards. Plain "python3 -m http.server" has no such paths.
-  proxy: { irsa: "/proxy/irsa", jpl: "/proxy/jpl", simbad: "/proxy/simbad" },
+  proxy: { irsa: "/proxy/irsa", jpl: "/proxy/jpl", simbad: "/proxy/simbad", vizier: "/proxy/vizier" },
 
   // Where the observer stands at start-up (editable in the page).
   location: { lat: 23.81, lon: 90.41, name: "Dhaka" },
@@ -56,6 +61,9 @@ export const CONFIG = {
   wise: {
     enabled: true,
     base: "http://byw.tools/wiseview",
+    // Used instead when the app itself is served over https (Vercel, GitHub Pages ...). Set to "" if byw.tools has no https;
+    // the panel then shows a button that opens WiseView in a new tab.
+    secureBase: "https://byw.tools/wiseview",
     size: 176, deepSkySize: 300,
     // WiseView zoom for each field size, so the image is about 545 px wide and fills the crop.
     zoom: { star: 9, deep: 5 },

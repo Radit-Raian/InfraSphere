@@ -4,9 +4,9 @@ import { CONFIG } from "./config.js";
 
 const routes = {};           // service -> "direct" | "proxy", remembered once one works
 
-const origins = () => ({ irsa: CONFIG.irsaBase, jpl: new URL(CONFIG.sbdbApi).origin, simbad: new URL(CONFIG.simbadTap).origin });
+const origins = () => ({ irsa: CONFIG.irsaBase, jpl: new URL(CONFIG.sbdbApi).origin, simbad: new URL(CONFIG.simbadTap).origin, vizier: new URL(CONFIG.vizierTap).origin });
 
-/** service: "irsa" | "jpl" | "simbad"; url: the full https address. Resolves with a fetch Response. */
+/** service: "irsa" | "jpl" | "simbad" | "vizier"; url: the full https address. Resolves with a fetch Response. */
 export async function svcFetch(service, url, init = {}) {
   const origin = origins()[service];
   const viaProxy = () => fetch(CONFIG.proxy[service] + url.slice(origin.length), init);

@@ -6,13 +6,13 @@
 import { CONFIG } from "./config.js";
 
 /** WiseView address for a target. All settings come from CONFIG.wise, so the view opens ready to blink. */
-export function wiseUrl(ra, dec, { size, zoom } = {}) {
+export function wiseUrl(ra, dec, { size, zoom, base } = {}) {
   const w = CONFIG.wise;
   const r = ((Number(ra) % 360) + 360) % 360;
   const d = Math.max(-90, Math.min(90, Number(dec)));
   const parts = [`ra=${r.toFixed(6)}`, `dec=${d.toFixed(6)}`, `size=${Math.round(size || w.size)}`];
   for (const [k, v] of Object.entries({ ...w.params, ...(zoom ? { zoom } : {}) })) parts.push(`${k}=${v}`);
-  return w.base + "#" + parts.join("&");
+  return (base || w.base) + "#" + parts.join("&");
 }
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -90,11 +90,27 @@ export class WisePanel {
   open({ ra, dec, name, group }) {
     if (!CONFIG.wise.enabled || !Number.isFinite(ra) || !Number.isFinite(dec)) return;
     const deep = group === "galaxy" || group === "nebula" || group === "cluster";
-    const url = wiseUrl(ra, dec, deep ? { size: CONFIG.wise.deepSkySize, zoom: CONFIG.wise.zoom.deep } : { size: CONFIG.wise.size, zoom: CONFIG.wise.zoom.star });
+    const w = CONFIG.wise, secure = location.protocol === "https:";
+    // An https page cannot show an http frame (the browser blocks it). On https use w.secureBase if there is one.
+    const base = secure ? (w.secureBase || "") : w.base;
+    const opts = deep ? { size: w.deepSkySize, zoom: w.zoom.deep } : { size: w.size, zoom: w.zoom.star };
+    const url = wiseUrl(ra, dec, { ...opts, base: base || w.base });
     this.target = { ra, dec, name, url };
-    this.tabLink.href = url;
+    this.tabLink.href = url;       // a new tab is a normal page visit, so plain http is fine there
     this.tabLink.title = "Open WiseView for " + (name || "this position") + " in a new tab";
     this.view.innerHTML = "";
+    this.frameEl = null;
+    if (!base) {
+      const p = el("div", "wise-blocked");
+      p.append(el("p", "note", "WiseView is only available over plain http, and browsers block that inside an https page."));
+      const a = el("a", "btn primary", "Open WiseView in a new tab");
+      a.href = url; a.target = "_blank"; a.rel = "noopener";
+      p.append(a);
+      this.view.appendChild(p);
+      this.root.classList.remove("hidden");
+      this._layout();
+      return;
+    }
     const fr = document.createElement("iframe");
     fr.title = "WISE epochs" + (name ? " for " + name : ""); fr.loading = "eager"; fr.referrerPolicy = "no-referrer";
     fr.src = url;
@@ -102,7 +118,6 @@ export class WisePanel {
     this.view.appendChild(fr);
     this.root.classList.remove("hidden");
     this._layout();
-    if (location.protocol === "https:" && url.startsWith("http:")) this.ui.say("WISE site is plain http, the browser may block it here.", 5000);
   }
 
   /** Update the name only (the frame is not reloaded). */

@@ -19,6 +19,7 @@ TARGETS = {
     "/proxy/irsa/": os.environ.get("INFRASPHERE_IRSA", "https://irsa.ipac.caltech.edu/"),
     "/proxy/jpl/": os.environ.get("INFRASPHERE_JPL", "https://ssd-api.jpl.nasa.gov/"),
     "/proxy/simbad/": os.environ.get("INFRASPHERE_SIMBAD", "https://simbad.cds.unistra.fr/"),
+    "/proxy/vizier/": os.environ.get("INFRASPHERE_VIZIER", "https://tapvizier.cds.unistra.fr/"),
 }
 
 

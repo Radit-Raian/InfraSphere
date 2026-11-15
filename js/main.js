@@ -261,7 +261,6 @@ $("search").addEventListener("keydown", (e) => { if (e.key === "Enter") searchOb
 $("searchBtn").addEventListener("click", () => searchObject($("search").value));
 initDock();
 if (CONFIG.simulate) {
-  $("credits").textContent = "SIMULATED sky (magma colour scale, build 2): a procedural model after the SPHEREx Sky Simulator (Crill et al. 2025, ApJS 281, 10), not real survey data. Add ?real=1 to the address for NASA/JPL-Caltech data. Object data: SIMBAD, CDS.";
   document.title = "InfraSphere (simulated sky)";
 }
 
