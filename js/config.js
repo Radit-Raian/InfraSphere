@@ -63,7 +63,7 @@ export const CONFIG = {
     base: "http://byw.tools/wiseview",
     // Used instead when the app itself is served over https (Vercel, GitHub Pages ...). Set to "" if byw.tools has no https;
     // the panel then shows a button that opens WiseView in a new tab.
-    secureBase: "https://byw.tools/wiseview",
+    secureBase: "",
     size: 176, deepSkySize: 300,
     // WiseView zoom for each field size, so the image is about 545 px wide and fills the crop.
     zoom: { star: 9, deep: 5 },
