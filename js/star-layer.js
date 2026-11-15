@@ -24,7 +24,7 @@ export function viewLimit(fovRad, aspect, budget = STAR_BUDGET) {
 }
 
 /**
- * Returns project(ux, uy, uz, out): a star's unit vector in the equatorial frame (J2000) -> out = [x, y, up], where x and
+ * Returns project(ux, uy, uz, out): a star's unit vector in the equatorial frame (J2000) -> out = [x, y, up, north, east], where x and
  * y are CSS pixels (the same as View.project) and up is the height above the horizon (-1 .. 1). It returns false when
  * the star cannot be shown. Written without trigonometry so that thousands of stars cost little.
  */
@@ -46,7 +46,7 @@ export function makeProjector(view, latDeg, lst) {
       if (c <= 0.05) return false;
       out[0] = W / 2 + (vx / c) * k; out[1] = H / 2 - (vy / c) * k;
     }
-    out[2] = up;
+    out[2] = up; out[3] = n; out[4] = e;
     return true;
   };
 }
@@ -83,7 +83,7 @@ export class StarLayer {
     this.drawn = 0;                  // stars drawn last frame
     this.lastGen = -1e9;
     this.band = "color";
-    this._out = [0, 0, 0];
+    this._out = [0, 0, 0, 0, 0];
     this._buckets = Array.from({ length: N_TEMP * N_ALPHA }, () => []);
     this._glow = [];
     this.setBand("color");
@@ -148,7 +148,7 @@ export class StarLayer {
       if (!project(ux[i], uy[i], uz[i], out)) continue;
       const x = out[0], y = out[1];
       if (x < -8 || x > W + 8 || y < -8 || y > H + 8) continue;
-      if (opts.hideBelow && out[2] < -0.004) continue;
+      if (opts.hideBelow && out[2] < (opts.horizon ? opts.horizon(out[3], out[4]) : -0.004)) continue;
       const m = Math.log10(F / sMin);                              // decades above the faintest star shown
       const r = Math.min(6.5, 0.55 + 0.9 * m);
       const a = Math.min(N_ALPHA - 1, Math.floor(2 + m * 9));

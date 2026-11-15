@@ -26,7 +26,7 @@ export const CONFIG = {
   proxy: { irsa: "/proxy/irsa", jpl: "/proxy/jpl", simbad: "/proxy/simbad" },
 
   // Where the observer stands at start-up (editable in the page).
-  location: { lat: 23.81, lon: 90.41 },
+  location: { lat: 23.81, lon: 90.41, name: "Dhaka" },
 
   // D1 to D6 are the six SPHEREx detector maps. Wavelengths are approximate.
   bands: [
@@ -57,10 +57,10 @@ export const CONFIG = {
     enabled: true,
     base: "http://byw.tools/wiseview",
     size: 176, deepSkySize: 300,
-    // WiseView zoom for each field size, so the image is about 550-580 px wide and fits the crop.
+    // WiseView zoom for each field size, so the image is about 545 px wide and fills the crop.
     zoom: { star: 9, deep: 5 },
     frame: { w: 1400, h: 900 },
-    crop: { x: 260, y: 0, w: 600, h: 620 },
+    crop: { x: 285, y: 43, w: 540, h: 540 },
     params: {
       band: 2, speed: 500, minbright: "-50.0000", maxbright: "500.0000", window: 0.5, diff_window: 1, linear: 1,
       color: "", zoom: 9, border: 0, gaia: 0, invert: 1, maxdyr: 0, scandir: 0, neowise: 0, diff: 0, outer_epochs: 0,

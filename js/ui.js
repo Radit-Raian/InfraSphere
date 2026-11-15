@@ -49,6 +49,9 @@ const pad = (n) => String(n).padStart(2, "0");
 export function setTimeInput(ms) {
   const d = new Date(ms);
   $("time").value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const pt = document.getElementById("pill-time"), pd = document.getElementById("pill-date");   // the date/time pill, bottom right
+  if (pt) pt.textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  if (pd) pd.textContent = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 // ---------- object info card ----------
@@ -102,6 +105,7 @@ export function showInfo(o, commonName) {
       ${row("Proper motion", pm)}
       ${row("Velocity", motion)}
     </table>
+    <p class="wiki" id="info-wiki" hidden></p>
     <div class="links">
       <a href="${esc(simbadUrl(o.main_id))}" target="_blank" rel="noopener">Open in SIMBAD</a>
       <a href="${esc(CONFIG.irsaPage)}" target="_blank" rel="noopener">SPHEREx data at IRSA</a>
@@ -109,6 +113,7 @@ export function showInfo(o, commonName) {
     ${inspectHandler ? '<div class="row"><button class="btn primary" id="info-inspect">Inspect SPHEREx epochs here</button></div>' : ""}
     <p class="note">Object data from SIMBAD.</p>`;
   el.querySelector(".close").addEventListener("click", hideInfo);
+  el.dataset.key = String(o.oid);
   const ib = el.querySelector("#info-inspect");
   if (ib) ib.addEventListener("click", () => inspectHandler(o.ra, o.dec, title));
 }
@@ -151,4 +156,22 @@ export function showSolarInfo(o) {
       : "Position computed for the time shown."} SPHEREx catches moving objects only in single exposures, so they are not part of the combined sky map.</p>
     <div class="links"><a href="${esc(CONFIG.irsaPage)}" target="_blank" rel="noopener">SPHEREx data at IRSA</a></div>`;
   el.querySelector(".close").addEventListener("click", hideInfo);
+}
+
+/** Wikipedia line of the card for object `key`: { text, url }, { loading: true } or { none: true }.
+ *  Ignored if the card has moved on to something else. */
+export function setInfoWiki(key, info) {
+  const el = $("info"), slot = el.querySelector("#info-wiki");
+  if (!slot || el.classList.contains("hidden") || el.dataset.key !== String(key)) return;
+  slot.hidden = false;
+  if (info.loading || info.none) {
+    slot.className = "wiki muted";
+    slot.textContent = info.loading ? "Looking up Wikipedia…" : "No Wikipedia article found for this object.";
+    return;
+  }
+  slot.className = "wiki";
+  slot.textContent = info.text + " ";
+  const a = document.createElement("a");
+  a.href = info.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "more on Wikipedia";
+  slot.appendChild(a);
 }

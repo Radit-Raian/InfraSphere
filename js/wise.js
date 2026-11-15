@@ -65,11 +65,13 @@ export class WisePanel {
     const w = CONFIG.wise;
     const c = cropFromQuery() || w.crop;
     const f = w.frame;
-    // scale the crop down if the window is too narrow or too short for it
-    const k = Math.min(1, Math.max(240, window.innerWidth - 60) / c.w, Math.max(240, window.innerHeight - 190) / c.h);
+    this.root.classList.toggle("full", this.full);          // the side panel widens in full-page mode, so measure after this
+    const side = document.getElementById("side");
+    const availW = Math.max(200, (side ? side.clientWidth : 380) - 30);
+    const k = Math.min(1, availW / c.w);                    // scale the crop down to the panel width; the panel scrolls vertically
     if (this.full) {
-      this.view.style.width = Math.min(f.w, window.innerWidth - 60) + "px";
-      this.view.style.height = Math.min(f.h, window.innerHeight - 190) + "px";
+      this.view.style.width = Math.min(f.w, availW) + "px";
+      this.view.style.height = Math.min(f.h, Math.max(300, window.innerHeight - 260)) + "px";
     } else {
       this.view.style.width = Math.round(c.w * k) + "px";
       this.view.style.height = Math.round(c.h * k) + "px";
@@ -81,7 +83,6 @@ export class WisePanel {
       fr.style.transform = this.full ? "none" : `scale(${k}) translate(${-c.x}px, ${-c.y}px)`;
     }
     this.fullBtn.textContent = this.full ? "Image only" : "Full page";
-    this.root.classList.toggle("full", this.full);
   }
 
   /** Show the WISE epochs for a target: { ra, dec (deg), name?, group? }. A new frame is made every time,

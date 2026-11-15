@@ -52,7 +52,7 @@ export class LabelLayer {
     return this._order;
   }
 
-  /** opts: { groups, showLabels, hideBelow, maxDrawn, selected, starDots } */
+  /** opts: { groups, showLabels, hideBelow, horizon, maxDrawn, selected, starDots } */
   draw(ctx, view, latDeg, lst, opts) {
     this.screen.length = 0;
     ctx.font = FONT;
@@ -64,7 +64,7 @@ export class LabelLayer {
     for (const o of this._sorted()) {
       if (!opts.groups[o.group]) continue;
       const v = eqToAltAzVec(o.ra, o.dec, latDeg, lst);
-      if (opts.hideBelow && v[2] < -0.004) continue;
+      if (opts.hideBelow && v[2] < (opts.horizon ? opts.horizon(v[0], v[1]) : -0.004)) continue;
       const p = view.project(v);
       if (!p || p[0] < -20 || p[0] > view.W + 20 || p[1] < -20 || p[1] > view.H + 20) continue;
       this.screen.push({ o, x: p[0], y: p[1] });
@@ -131,17 +131,20 @@ export class LabelLayer {
   }
 }
 
-/** N, NE, E ... marks along the horizon. */
+/** N, NE, E ... marks: a small red dot on the horizon with the letter below it, like Stellarium. */
 export function drawDirections(ctx, view) {
-  ctx.font = "600 15px 'Segoe UI', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ["N", "NE", "E", "SE", "S", "SW", "W", "NW"].forEach((nm, i) => {
     const a = i * 45 * D2R;
     const p = view.project([Math.cos(a), Math.sin(a), 0]);
     if (!p || p[0] < -40 || p[0] > view.W + 40 || p[1] < -40 || p[1] > view.H + 40) return;
-    ctx.fillStyle = nm === "N" ? "#f2557a" : nm.length === 1 ? "#f1e8ea" : "rgba(241,232,234,0.65)";
-    ctx.fillText(nm, p[0], p[1] - 16);
-    ctx.fillRect(p[0] - 0.5, p[1] - 6, 1, 6);
+    const main = nm.length === 1;
+    ctx.font = (main ? "700 18px" : "600 13px") + " 'Segoe UI', system-ui, sans-serif";
+    ctx.fillStyle = main ? "#d4606b" : "rgba(212,96,107,0.6)";
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], main ? 2.4 : 1.8, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.fillText(nm, p[0], p[1] + (main ? 19 : 15));
   });
 }

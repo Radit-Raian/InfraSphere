@@ -148,6 +148,9 @@ export function commonNamesQuery(oids) {
   return `SELECT oidref, id FROM ident WHERE oidref IN (${oids.map(Number).filter(Number.isFinite).join(", ")}) AND id LIKE 'NAME %'`;
 }
 
+/** Every identifier of one object ("* gam Cas", "HD 5394", "NAME Tsih" ...). */
+export const identsQuery = (oid) => `SELECT id FROM ident WHERE oidref = ${Number(oid)}`;
+
 // ---------- network ----------
 
 /** Pull the readable message out of a TAP error (a VOTable with an ERROR info, or plain text). */
@@ -212,3 +215,5 @@ export async function fetchCommonNames(oids, opts) {
   }
   return out;
 }
+/** All names of an object, as SIMBAD writes them. */
+export async function fetchIdents(oid, opts) { return (await runAdql(identsQuery(oid), opts)).map((r) => String(r.id).replace(/\s+/g, " ").trim()); }

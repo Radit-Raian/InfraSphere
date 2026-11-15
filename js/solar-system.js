@@ -179,7 +179,7 @@ export class SolarSystem {
     const placed = [];
     for (const o of items) {
       const v = eqToAltAzVec(o.ra, o.dec, latDeg, lst);
-      if (opts.hideBelow && v[2] < -0.004) continue;
+      if (opts.hideBelow && v[2] < (opts.horizon ? opts.horizon(v[0], v[1]) : -0.004)) continue;
       const p = view.project(v);
       if (!p || p[0] < -20 || p[0] > view.W + 20 || p[1] < -20 || p[1] > view.H + 20) continue;
       this.screen.push({ o, x: p[0], y: p[1] });

@@ -32,6 +32,44 @@ float gridLines(float lonD, float latD, float lonStep, float latStep, float pw) 
   return max(lonLine, latLine);
 }
 
+const float TAU = 6.28318530718;
+// Horizon ridges. Keep in sync with js/landscape.js (the overlay canvas uses that copy to hide stars behind the hills).
+float hash1(float n) {
+  uint x = uint(n);
+  x = x * 747796405u + 2891336453u;
+  x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+  x = (x >> 22u) ^ x;
+  return float(x & 0xFFFFu) / 65535.0;
+}
+float vnoise(float x) {
+  float i = floor(x), f = x - i, s = f * f * (3.0 - 2.0 * f);
+  return hash1(i) * (1.0 - s) + hash1(i + 1.0) * s;
+}
+float treeLayer(float u, float N, float salt, float hMin, float hMax, float wMin, float wMax) {
+  float t = u * N, cell = floor(t), f = t - cell;
+  float h1 = hash1(cell * 7.0 + salt), h2 = hash1(cell * 7.0 + salt + 1.0), h3 = hash1(cell * 7.0 + salt + 2.0);
+  float w = wMin + (wMax - wMin) * h2, c = 0.5 + (1.0 - w) * (h3 - 0.5);
+  float x = (f - c) / (0.5 * w);
+  if (abs(x) >= 1.0) return 0.0;
+  float H = hMin + (hMax - hMin) * h1;
+  float dome = sqrt(1.0 - x * x) * (0.88 + 0.12 * cos(x * 9.0 + h3 * 6.2832));
+  return H * (h3 > 0.8 ? 1.0 - abs(x) : dome);
+}
+float hillRidge(float u) {
+  return max(0.020 + 0.012 * sin(TAU * 2.0 * u + 1.3) + 0.008 * sin(TAU * 5.0 * u + 0.4) + 0.004 * sin(TAU * 11.0 * u + 2.0)
+    + 0.020 * pow(max(sin(TAU * u + 0.5), 0.0), 3.0), 0.0);
+}
+float treeHeight(float u) {
+  float uu = fract(u);
+  float z1 = smoothstep(0.2, 0.6, 0.5 + 0.5 * sin(TAU * 3.0 * u + 0.9));
+  float z2 = smoothstep(0.3, 0.7, 0.5 + 0.5 * sin(TAU * 2.0 * u + 3.1));
+  float h = max(z1 * treeLayer(uu, 22.0, 11.0, 0.045, 0.105, 0.6, 0.98), z2 * treeLayer(uu, 71.0, 53.0, 0.014, 0.038, 0.7, 1.0));
+  return h > 0.0 ? h * (0.94 + 0.12 * vnoise(uu * 600.0)) : 0.0;
+}
+float farRidge(float u) {
+  return max(0.050 + 0.030 * sin(TAU * u + 4.0) + 0.016 * sin(TAU * 3.0 * u + 0.2) + 0.008 * sin(TAU * 7.0 * u + 1.0) + 0.004 * sin(TAU * 19.0 * u), 0.0);
+}
+
 void main() {
   vec2 q = (gl_FragCoord.xy - 0.5 * uRes) / (0.5 * uRes.y);
   vec3 f = vec3(cos(uAlt) * cos(uAz), cos(uAlt) * sin(uAz), sin(uAlt));
@@ -116,12 +154,25 @@ void main() {
 
   vec3 col = sky;
   if (uGround) {
-    float k = smoothstep(-0.0025, 0.0025, d.z);
-    float depth = clamp(-d.z, 0.0, 1.0);
-    vec3 ground = mix(vec3(0.075, 0.055, 0.06), vec3(0.025, 0.018, 0.022), smoothstep(0.0, 0.5, depth));
-    col = mix(ground, sky, k);
-    float hl = 1.0 - smoothstep(0.0, 1.6 * pw, abs(asin(clamp(d.z, -1.0, 1.0)) * 180.0 / PI));
-    col = mix(col, vec3(0.95, 0.5, 0.6), hl * 0.55);
+    float alt = asin(clamp(d.z, -1.0, 1.0));
+    float u = atan(d.y, d.x) / TAU;
+    float hr = hillRidge(u), fs = hr + treeHeight(u), fa = farRidge(u);
+    float aa = max(pw * PI / 180.0, 1e-5) * 0.8;               // one pixel, in radians
+
+    // pale haze just above the hills, like a town glow
+    float above = max(alt - max(fs, fa), 0.0);
+    col += vec3(0.26, 0.20, 0.28) * 0.34 * exp(-above * 7.0);
+
+    // far hills: blue-grey haze, a little lighter toward their crest
+    vec3 farCol = mix(vec3(0.020, 0.018, 0.030), vec3(0.085, 0.075, 0.110), smoothstep(-0.03, fa, alt));
+    col = mix(farCol, col, smoothstep(-aa, aa, alt - fa));
+
+    // trees: black against the sky
+    col = mix(vec3(0.0), col, smoothstep(-aa, aa, alt - fs));
+
+    // the hill itself and everything below the horizon: black, with the faintest lift at the crest
+    vec3 ground = mix(vec3(0.014, 0.011, 0.015), vec3(0.0), smoothstep(0.0, 0.12, hr - alt));
+    col = mix(ground, col, smoothstep(-aa, aa, alt - hr));
   }
   outColor = vec4(col, 1.0);
 }`;

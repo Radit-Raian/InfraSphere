@@ -15,6 +15,9 @@ import { SolarSystem } from "./solar-system.js";
 import { Inspector } from "./inspector.js";
 import { StarLayer } from "./star-layer.js";
 import { WisePanel } from "./wise.js";
+import { initDock } from "./dock.js";
+import { horizonSin } from "./landscape.js";
+import { wikiCandidates, candidatesFromIdents, fetchWikiBlurb } from "./wiki.js";
 
 const $ = UI.$;
 
@@ -22,7 +25,7 @@ const $ = UI.$;
 const state = {
   lat: CONFIG.location.lat, lon: CONFIG.location.lon,
   simMs: Date.now(), speed: 1,
-  ground: true, grid: true, eqGrid: false, galGrid: false, directions: true, flip: false,
+  ground: true, grid: false, eqGrid: false, galGrid: false, directions: true, flip: false,
   tiles: false, asteroids: false, neo: false,
   expo: 1.0, gam: 1.0,
   quality: 2, sharpen: true,
@@ -72,6 +75,37 @@ window.addEventListener("resize", resize);
 const lst = () => lstRad(state.simMs, state.lon);
 const centerEq = () => altAzVecToEq(view.basis().f, state.lat, lst());
 
+// ---------- Wikipedia blurb in the info card ----------
+// Only for objects that can have an article. Gaia, 2MASS and similar catalogue entries never do, so they skip this and the card
+// behaves exactly as before. The lookup starts a moment after the card is shown so it never competes with the SIMBAD answer.
+const wikiCache = new Map();     // oid -> blurb or null
+const CATALOGUE_ONLY = /^(Gaia|2MASS|WISE|AllWISE|TYC|UCAC|PPMXL|SDSS|USNO|GSC|LEDA|PGC|SSTSL|\[)/i;
+async function attachWiki(obj, name) {
+  const key = obj.oid;
+  if (key === null || key === undefined) return;
+  const plain = String(obj.main_id || "").replace(/^(\*\*|\*|V\*|NAME|Cl\*) /, "").trim();
+  if (!name && CATALOGUE_ONLY.test(plain)) return;
+  const cardIsOn = () => $("info").dataset.key === String(key) && !$("info").classList.contains("hidden");
+  if (wikiCache.has(key)) { const b = wikiCache.get(key); UI.setInfoWiki(key, b || { none: true }); return; }
+  await new Promise((r) => setTimeout(r, 400));
+  if (!cardIsOn()) return;
+  UI.setInfoWiki(key, { loading: true });
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 12000);
+  try {
+    let blurb = await fetchWikiBlurb(wikiCandidates(obj.main_id, name ? [name] : []), { signal: ctl.signal });
+    if (!blurb && cardIsOn()) {                                   // try all the object's other names (HD, HIP, common names ...)
+      let ids = [];
+      try { ids = await Simbad.fetchIdents(key, { signal: ctl.signal }); } catch (e) { if (e.name === "AbortError") throw e; }
+      blurb = await fetchWikiBlurb(candidatesFromIdents(ids), { signal: ctl.signal });
+    }
+    wikiCache.set(key, blurb);
+    UI.setInfoWiki(key, blurb || { none: true });
+  } catch (e) {
+    console.warn("Wikipedia lookup failed", e);
+    UI.setInfoWiki(key, { none: true });
+  } finally { clearTimeout(timer); }
+}
+
 // ---------- looking at an object ----------
 async function showDetails(obj, name) {
   state.selected = { ra: obj.ra, dec: obj.dec };
@@ -80,6 +114,7 @@ async function showDetails(obj, name) {
   try {
     const full = obj.oid !== null && obj.oid !== undefined ? await Simbad.fetchDetails(obj.oid) : null;
     UI.showInfo(full || obj, name || obj.name);
+    attachWiki(full || obj, name || obj.name);
   } catch (e) {
     UI.showInfo(obj, name || obj.name);
     UI.say("Could not fetch full details (" + e.message + ").", 4000);
@@ -110,6 +145,7 @@ async function lookupSpot(px, py) {
     if (sepArcsec > 3) wise.open({ ra: obj.ra, dec: obj.dec, name: Simbad.prettyName(obj.main_id), group: obj.group });
     else wise.rename(Simbad.prettyName(obj.main_id));
     UI.showInfo(obj, null);
+    attachWiki(obj, null);
   } catch (e) {
     if (seq !== lookupSeq) return;
     console.error("SIMBAD lookup failed", e);
@@ -223,8 +259,7 @@ for (const g of Object.keys(state.groups)) {
 }
 $("search").addEventListener("keydown", (e) => { if (e.key === "Enter") searchObject(e.target.value); });
 $("searchBtn").addEventListener("click", () => searchObject($("search").value));
-$("toggle").addEventListener("click", () => $("panel").classList.toggle("hidden"));
-if (window.innerWidth < 700) $("panel").classList.add("hidden");
+initDock();
 if (CONFIG.simulate) {
   $("credits").textContent = "SIMULATED sky (magma colour scale, build 2): a procedural model after the SPHEREx Sky Simulator (Crill et al. 2025, ApJS 281, 10), not real survey data. Add ?real=1 to the address for NASA/JPL-Caltech data. Object data: SIMBAD, CDS.";
   document.title = "InfraSphere (simulated sky)";
@@ -252,15 +287,16 @@ function tick(now) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, view.W, view.H);
   stars.update(view, eq, now);
-  stars.draw(ctx, view, state.lat, L, { hideBelow: state.ground });
+  const horizon = state.ground ? horizonSin : null;        // hills hide whatever lies behind them
+  stars.draw(ctx, view, state.lat, L, { hideBelow: state.ground, horizon });
   if (state.tiles) tiles.draw(ctx, view, state.lat, L, { selected: state.tile });
   if (state.directions) drawDirections(ctx, view);
   layer.draw(ctx, view, state.lat, L, {
-    groups: state.groups, showLabels: true, hideBelow: state.ground,
+    groups: state.groups, showLabels: true, hideBelow: state.ground, horizon,
     maxDrawn: CONFIG.labels.maxDrawn, selected: state.selected, starDots: stars.enabled
   });
   solar.update(state.simMs, { asteroids: state.asteroids, neo: state.neo });
-  solar.draw(ctx, view, state.lat, L, { asteroids: state.asteroids, neo: state.neo, hideBelow: state.ground });
+  solar.draw(ctx, view, state.lat, L, { asteroids: state.asteroids, neo: state.neo, hideBelow: state.ground, horizon });
 
   sky.maybeSharpen({ now, idle: isIdle(now, CONFIG.patch.idleMs), enabled: state.sharpen, flip: state.flip, view, centerEq: eq });
   feed.maybeUpdate({ now, idle: isIdle(now, CONFIG.labels.idleMs), enabled: true, view, centerEq: eq });
