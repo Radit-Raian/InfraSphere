@@ -145,6 +145,11 @@ export class WisePanel {
     const ring = el("div", "wise-ring");
     const lab = el("div", "wise-label", "Loading epochs…");
     const note = el("div", "wise-note");
+    // Inline styles, so the panel looks right even if style.css is an older copy.
+    Object.assign(box.style, { position: "absolute", inset: "0", cursor: "pointer", background: "#000", overflow: "hidden" });
+    Object.assign(pic.style, { position: "absolute", inset: "0", width: "100%", height: "100%", objectFit: "cover", display: "block" });
+    Object.assign(ring.style, { position: "absolute", left: "50%", top: "50%", width: "14%", aspectRatio: "1", transform: "translate(-50%, -50%)", border: "1.5px solid rgba(242,85,122,.9)", borderRadius: "50%", pointerEvents: "none" });
+    Object.assign(lab.style, { position: "absolute", left: "8px", top: "8px", background: "rgba(10,7,9,.72)", borderRadius: "6px", padding: "4px 8px", fontSize: "12px", pointerEvents: "none", color: "#f1e8ea" });
     box.append(pic, ring, lab);
     this.view.append(box);
     this.root.classList.remove("hidden");
