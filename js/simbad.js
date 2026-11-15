@@ -158,12 +158,14 @@ export function tapErrorMessage(raw) {
   return msg.slice(0, 300) || "no details";
 }
 
-export async function runAdql(query, { signal } = {}) {
-  const params = new URLSearchParams({ request: "doQuery", lang: "adql", format: "json", phase: "run", query });
+// Index of the SIMBAD address that worked last, so later queries do not retry a dead one first.
+let tapIndex = 0;
+
+async function runAdqlAt(base, query, params, signal) {
   const useGet = query.length < 1500;
   const res = useGet
-    ? await svcFetch("simbad", CONFIG.simbadTap + "?" + params.toString(), { signal })
-    : await svcFetch("simbad", CONFIG.simbadTap, {
+    ? await svcFetch("simbad", base + "?" + params.toString(), { signal })
+    : await svcFetch("simbad", base, {
         method: "POST", signal,
         headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params.toString()
       });
@@ -172,6 +174,26 @@ export async function runAdql(query, { signal } = {}) {
   let json;
   try { json = JSON.parse(raw); } catch (_) { throw new Error("SIMBAD returned an error: " + tapErrorMessage(raw)); }
   return rowsFromTap(json);
+}
+
+/** Run a query on SIMBAD. If one address fails (CDS sometimes answers with a "page unavailable" page), the
+ *  mirrors in CONFIG.simbadMirrors are tried in turn. */
+export async function runAdql(query, { signal } = {}) {
+  const params = new URLSearchParams({ request: "doQuery", lang: "adql", format: "json", phase: "run", query });
+  const bases = [CONFIG.simbadTap, ...(CONFIG.simbadMirrors || [])];
+  let lastErr;
+  for (let k = 0; k < bases.length; k++) {
+    const i = (tapIndex + k) % bases.length;
+    try {
+      const rows = await runAdqlAt(bases[i], query, params, signal);
+      tapIndex = i;
+      return rows;
+    } catch (e) {
+      if (e.name === "AbortError") throw e;
+      lastErr = e;
+    }
+  }
+  throw lastErr;
 }
 
 export async function fetchStars(args, opts) { return (await runAdql(starsQuery(args), opts)).map(normalizeRow); }

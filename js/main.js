@@ -14,6 +14,7 @@ import { TileGrid } from "./tiles.js";
 import { SolarSystem } from "./solar-system.js";
 import { Inspector } from "./inspector.js";
 import { StarLayer } from "./star-layer.js";
+import { WisePanel } from "./wise.js";
 
 const $ = UI.$;
 
@@ -50,6 +51,7 @@ const solar = new SolarSystem(UI.ui);
 const stars = new StarLayer();
 stars.enabled = CONFIG.simulate;
 const inspector = new Inspector(UI.ui);
+const wise = new WisePanel(UI.ui);
 UI.setInspectHandler((ra, dec, title) => inspector.open({ ra, dec, title }));
 
 let lastInteract = 0;
@@ -73,6 +75,7 @@ const centerEq = () => altAzVecToEq(view.basis().f, state.lat, lst());
 // ---------- looking at an object ----------
 async function showDetails(obj, name) {
   state.selected = { ra: obj.ra, dec: obj.dec };
+  wise.open({ ra: obj.ra, dec: obj.dec, name: name || obj.name || Simbad.prettyName(obj.main_id), group: obj.group });
   UI.showInfoLoading(name || Simbad.prettyName(obj.main_id));
   try {
     const full = obj.oid !== null && obj.oid !== undefined ? await Simbad.fetchDetails(obj.oid) : null;
@@ -83,21 +86,36 @@ async function showDetails(obj, name) {
   }
 }
 
+let lookupSeq = 0;
 async function lookupSpot(px, py) {
   // Ask SIMBAD for the closest object within about 14 pixels.
   const d = view.dirFromPixel(px, py);
   const eq = altAzVecToEq(d, state.lat, lst());
   const radius = Math.min(Math.max(view.angleBetweenPixels(px, py, px + 14, py) * R2D, 0.003), 3);
+  const seq = ++lookupSeq;                 // a newer click makes an older, slower answer stale
   state.selected = { ra: eq.ra, dec: eq.dec };
   UI.showInfoLoading("Looking up this spot");
+  // The WISE window opens at once on the clicked point (it does not need SIMBAD). When SIMBAD answers with an
+  // object more than a few arcseconds away, the window is moved onto that object's own catalogue position.
+  wise.open({ ra: eq.ra, dec: eq.dec, name: "Sky position" });
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 15000);
   try {
-    const obj = await Simbad.fetchNearest({ ra: eq.ra, dec: eq.dec, radius });
-    if (!obj) { UI.showInfoMessage("Nothing here", "SIMBAD lists no object within about 14 pixels of that spot."); return; }
+    const obj = await Simbad.fetchNearest({ ra: eq.ra, dec: eq.dec, radius }, { signal: ctl.signal });
+    if (seq !== lookupSeq) return;
+    if (!obj) { UI.showInfoMessage("Nothing here", "SIMBAD lists no object within about 14 pixels of that spot. The WISE window shows the exact point you clicked."); return; }
     layer.add([obj]);
     state.selected = { ra: obj.ra, dec: obj.dec };
+    const sepArcsec = Math.hypot((obj.ra - eq.ra) * Math.cos(eq.dec * D2R), obj.dec - eq.dec) * 3600;
+    if (sepArcsec > 3) wise.open({ ra: obj.ra, dec: obj.dec, name: Simbad.prettyName(obj.main_id), group: obj.group });
+    else wise.rename(Simbad.prettyName(obj.main_id));
     UI.showInfo(obj, null);
   } catch (e) {
-    UI.showInfoMessage("Lookup failed", e.message);
+    if (seq !== lookupSeq) return;
+    console.error("SIMBAD lookup failed", e);
+    UI.showInfoMessage("Lookup failed", e.name === "AbortError" ? "SIMBAD did not answer within 15 seconds." : e.message);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -110,6 +128,7 @@ async function onSkyClick(px, py) {
     const eq = altAzVecToEq(view.dirFromPixel(px, py), state.lat, lst());
     const t = tiles.tileAt(eq.ra, eq.dec);
     state.tile = t; state.selected = null;
+    wise.open({ ra: eq.ra, dec: eq.dec, name: "Tile " + t.name });
     UI.showTileCard(t, {
       onInspect: () => inspector.open({ ra: t.ra, dec: t.dec, title: "Tile " + t.name }),
       onLookup: () => { state.tile = null; lookupSpot(px, py); }

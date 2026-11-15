@@ -11,6 +11,8 @@ export const CONFIG = {
 
   // SIMBAD (CDS) table access service, used for every object label.
   simbadTap: "https://simbad.cds.unistra.fr/simbad/sim-tap/sync",
+  // Tried in order if the address above fails (CfA Harvard hosts a copy of SIMBAD).
+  simbadMirrors: ["https://simbad.cfa.harvard.edu/simbad/sim-tap/sync"],
   simbadPage: "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=",
 
   irsaPage: "https://irsa.ipac.caltech.edu/Missions/spherex.html",
@@ -45,6 +47,28 @@ export const CONFIG = {
 
   // Detailed patch fetched when the view is zoomed in and still.
   patch: { size: 1536, maxFovDeg: 80, idleMs: 450, recheckMs: 600 },
+
+  // WISE time series (WiseView, byw.tools), opened for the spot you click. `params` are the WiseView settings
+  // from the example address (ra, dec and size are filled in per click). Size is the field width in arcseconds.
+  // The page is shown in a frame of `frame` pixels, and only the `crop` rectangle of it is visible: the left
+  // settings sidebar is cut off (it is about 260 px wide) and only the blinking image is left. If the crop is off, open the app with ?wisecrop=x,y,w,h to
+  // try values, or press "Full page" in the window to see where the image sits.
+  wise: {
+    enabled: true,
+    base: "http://byw.tools/wiseview",
+    size: 176, deepSkySize: 300,
+    // WiseView zoom for each field size, so the image is about 550-580 px wide and fits the crop.
+    zoom: { star: 9, deep: 5 },
+    frame: { w: 1400, h: 900 },
+    crop: { x: 260, y: 0, w: 600, h: 620 },
+    params: {
+      band: 2, speed: 500, minbright: "-50.0000", maxbright: "500.0000", window: 0.5, diff_window: 1, linear: 1,
+      color: "", zoom: 9, border: 0, gaia: 0, invert: 1, maxdyr: 0, scandir: 0, neowise: 0, diff: 0, outer_epochs: 0,
+      unique_window: 1, smooth_scan: 0, shift: 0, pmra: 0, pmdec: 0,
+      synth_a: 0, synth_a_sub: 0, synth_a_ra: "", synth_a_dec: "", synth_a_w1: "", synth_a_w2: "", synth_a_pmra: 0, synth_a_pmdec: 0, synth_a_mjd: "",
+      synth_b: 0, synth_b_sub: 0, synth_b_ra: "", synth_b_dec: "", synth_b_w1: "", synth_b_w2: "", synth_b_pmra: 0, synth_b_pmdec: 0, synth_b_mjd: ""
+    }
+  },
 
   // SIMBAD label feed.
   labels: { idleMs: 600, recheckMs: 700, backoffMs: 20000, maxDrawn: 140, topStars: 500, topDeepSky: 150, maxStored: 3000 }

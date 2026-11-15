@@ -169,3 +169,21 @@ details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
   .ix-left, .ix-mid, .ix-right { overflow: visible; }
   .ix-batch { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
 }
+/* One card: SIMBAD info on the left, WISE epochs on the right */
+#side {
+  position: absolute; top: 56px; right: 12px; z-index: 8; display: flex; gap: 14px; align-items: flex-start;
+  max-width: calc(100% - 24px); max-height: calc(100% - 100px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; backdrop-filter: blur(6px);
+}
+#side:not(:has(> :not(.hidden))) { display: none; }
+#side:has(#wise.full) { flex-direction: column; }
+#side #info { position: static; width: 300px; flex: none; max-height: none; overflow: visible; background: none; border: 0; padding: 0; backdrop-filter: none; }
+#wise { flex: none; min-width: 0; }
+.wise-tools { display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 6px; }
+.wise-tools .btn { padding: 3px 8px; font-size: 12px; color: var(--text); text-decoration: none; }
+.wise-view { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: #000; max-width: 100%; }
+.wise-view iframe { position: absolute; left: 0; top: 0; border: 0; background: #000; }
+@media (max-width: 900px) {
+  #side { flex-direction: column; left: 12px; right: 12px; top: auto; bottom: 56px; max-height: 70%; }
+  #side #info { width: 100%; }
+}
