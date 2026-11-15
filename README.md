@@ -12,7 +12,7 @@ Version 0.2.0. Built for the NASA Space Apps Challenge. Plain HTML, CSS and Java
 
 
 <p align="center">
-<img src="test/Screenshot from 2026-11-15 01-36-38.png" alt="InfraSphere Web" style="width:100%; height:auto;">
+<img src="test/Screenshot from 2026-11-16 01-32-56.png" alt="InfraSphere Web" style="width:100%; height:auto;">
 </p>
 
 ## Table of Contents
