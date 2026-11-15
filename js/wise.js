@@ -100,17 +100,9 @@ export class WisePanel {
     this.tabLink.title = "Open WiseView for " + (name || "this position") + " in a new tab";
     this.view.innerHTML = "";
     this.frameEl = null;
-    if (!base) {
-      const p = el("div", "wise-blocked");
-      p.append(el("p", "note", "WiseView is only available over plain http, and browsers block that inside an https page."));
-      const a = el("a", "btn primary", "Open WiseView in a new tab");
-      a.href = url; a.target = "_blank"; a.rel = "noopener";
-      p.append(a);
-      this.view.appendChild(p);
-      this.root.classList.remove("hidden");
-      this._layout();
-      return;
-    }
+    this._stopBlink();
+    this._stopBlink();
+    if (!base) { this._openBlink(ra, dec, deep, name, url); return; }
     const fr = document.createElement("iframe");
     fr.title = "WISE epochs" + (name ? " for " + name : ""); fr.loading = "eager"; fr.referrerPolicy = "no-referrer";
     fr.src = url;
@@ -120,10 +112,61 @@ export class WisePanel {
     this._layout();
   }
 
+  /** WiseView itself cannot be framed on an https page, so blink the unWISE epoch coadds (AllWISE, then one per NEOWISE year)
+   *  from the Legacy Surveys cutout service, which is https and works in plain <img> tags. */
+  _openBlink(ra, dec, deep, name, tabUrl) {
+    const w = CONFIG.wise, B = w.blink;
+    const arcsec = deep ? w.deepSkySize : w.size, N = B.px;
+    const frames = B.epochs.map((e) => ({
+      ...e,
+      src: `${B.cutout}?ra=${Number(ra).toFixed(6)}&dec=${Number(dec).toFixed(6)}&layer=${e.layer}&pixscale=${(arcsec / N).toFixed(4)}&size=${N}`,
+      ok: null, img: new Image()
+    }));
+    const box = el("div", "wise-blink");
+    const pic = el("img"); pic.alt = "WISE epochs"; pic.decoding = "async";
+    const ring = el("div", "wise-ring");
+    const lab = el("div", "wise-label", "Loading epochs…");
+    const note = el("div", "wise-note");
+    box.append(pic, ring, lab);
+    this.view.append(box);
+    this.root.classList.remove("hidden");
+    this._layout();
+    this.blink = { frames, pic, lab, i: -1, paused: false };
+    box.addEventListener("click", () => { if (this.blink) { this.blink.paused = !this.blink.paused; lab.dataset.p = this.blink.paused ? "1" : ""; } });
+    let pending = frames.length;
+    const done = () => {
+      if (--pending > 0) return;
+      const ok = frames.filter((f) => f.ok);
+      if (ok.length < 2) {
+        lab.textContent = ok.length ? "Only one epoch available here" : "No WISE images could be loaded. Use New tab.";
+        if (ok.length) { pic.src = ok[0].src; }
+      }
+    };
+    for (const f of frames) {
+      f.img.onload = () => { f.ok = true; if (this.blink && this.blink.frames === frames && this.blink.i < 0) this._tick(); done(); };
+      f.img.onerror = () => { f.ok = false; done(); };
+      f.img.src = f.src;
+    }
+    this.blinkTimer = setInterval(() => { if (this.blink && !this.blink.paused) this._tick(); }, B.ms);
+  }
+
+  _tick() {
+    const b = this.blink; if (!b) return;
+    const ok = b.frames.filter((f) => f.ok);
+    if (!ok.length) return;
+    b.i = (b.i + 1) % ok.length;
+    const f = ok[b.i];
+    b.pic.src = f.src;
+    b.lab.textContent = f.label + (b.paused ? " (paused)" : "") + "  ·  click to pause";
+  }
+
+  _stopBlink() { clearInterval(this.blinkTimer); this.blinkTimer = null; this.blink = null; }
+
   /** Update the name only (the frame is not reloaded). */
   rename(name) { if (this.target) { this.target.name = name; this.tabLink.title = "Open WiseView for " + name + " in a new tab"; } }
 
   close() {
+    this._stopBlink();
     this.root.classList.add("hidden");
     this.view.innerHTML = "";
     this.frameEl = null;
