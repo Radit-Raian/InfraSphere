@@ -68,18 +68,6 @@ export const CONFIG = {
     // WiseView zoom for each field size, so the image is about 545 px wide and fills the crop.
     zoom: { star: 9, deep: 5 },
     frame: { w: 1400, h: 900 },
-    // On an https page WiseView cannot be framed, so the panel blinks unWISE epoch coadds from the Legacy Surveys instead.
-    // Edit `epochs` freely (layer names are the Legacy Surveys viewer layers; a missing one is skipped).
-    blink: {
-      cutout: "https://www.legacysurvey.org/viewer/cutout.jpg", px: 256, ms: 700,
-      epochs: [
-        { layer: "unwise-w1w2", label: "2010-11 (AllWISE)" },
-        { layer: "unwise-neo1", label: "2014 (NEOWISE 1)" }, { layer: "unwise-neo2", label: "2015 (NEOWISE 2)" },
-        { layer: "unwise-neo3", label: "2016 (NEOWISE 3)" }, { layer: "unwise-neo4", label: "2017 (NEOWISE 4)" },
-        { layer: "unwise-neo5", label: "2018 (NEOWISE 5)" }, { layer: "unwise-neo6", label: "2019 (NEOWISE 6)" },
-        { layer: "unwise-neo7", label: "2020 (NEOWISE 7)" }
-      ]
-    },
     crop: { x: 285, y: 43, w: 540, h: 540 },
     params: {
       band: 2, speed: 500, minbright: "-50.0000", maxbright: "500.0000", window: 0.5, diff_window: 1, linear: 1,
