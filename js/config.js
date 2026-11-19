@@ -9,10 +9,14 @@ export const CONFIG = {
   hipsRoot: "https://alasky.cds.unistra.fr/SPHEREx/",
   hips2fits: "https://alasky.cds.unistra.fr/hips-image-services/hips2fits",
 
-  // SIMBAD (CDS) table access service, used for every object label.
-  simbadTap: "https://simbad.cds.unistra.fr/simbad/sim-tap/sync",
-  // Tried in order if the address above fails (CfA Harvard hosts a copy of SIMBAD).
-  simbadMirrors: ["https://simbad.cfa.harvard.edu/simbad/sim-tap/sync"],
+  // SIMBAD table access service, used for every object label.
+  // CDS Strasbourg is down (security incident), so the IDIA mirror in South Africa goes first.
+  simbadTap: "https://simbad.idia.ac.za/simbad/sim-tap/sync",
+  // Tried in order if the address above fails.
+  simbadMirrors: [
+    "https://simbad.cfa.harvard.edu/simbad/sim-tap/sync",
+    "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
+  ],
   simbadPage: "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=",
 
   // VizieR TAP (CDS): catalogue photometry (2MASS, AllWISE, Gaia) for the epoch inspector's spectrum view.
